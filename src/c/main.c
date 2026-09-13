@@ -274,7 +274,9 @@ static void draw_team_badge(GContext *ctx, const char *abbr, GFont font, GRect r
 
 // White-on-black-outline halo text — legible over any background color,
 // which is exactly what the endzone abbreviations need since they sit on
-// top of each team's own (highly variable) color.
+// top of each team's own (highly variable) color. Emery-only — see its call
+// site in draw_field_bar.
+#ifdef PBL_PLATFORM_EMERY
 static void draw_halo_text(GContext *ctx, const char *text, GFont font, GRect rect) {
   graphics_context_set_text_color(ctx, GColorBlack);
   GRect r = rect;
@@ -285,6 +287,7 @@ static void draw_halo_text(GContext *ctx, const char *text, GFont font, GRect re
   graphics_context_set_text_color(ctx, GColorWhite);
   graphics_draw_text(ctx, text, font, rect, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 }
+#endif
 
 // ── Field position bar ──────────────────────────────────────────────────────
 // 0 = away team's own goal line (left edge), 100 = home team's own goal line
@@ -317,9 +320,14 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez
   graphics_fill_rect(ctx, GRect(x + w - ez_w, y, ez_w, h), 0, GCornerNone);
 #endif
 
-  // Endzone abbreviations — white-on-black halo reads over any team color
+  // Endzone abbreviations — white-on-black halo reads over any team color.
+  // Emery-only: the smaller platforms' endzones aren't wide enough to fit a
+  // 3-letter abbreviation without truncating it, so skip it there entirely
+  // rather than show a cut-off "D...".
+#ifdef PBL_PLATFORM_EMERY
   draw_halo_text(ctx, s_away_abbr, f_ez, GRect(x, y, ez_w, h));
   draw_halo_text(ctx, s_home_abbr, f_ez, GRect(x + w - ez_w, y, ez_w, h));
+#endif
 
   // Separator lines between end zone and field
   graphics_context_set_stroke_color(ctx, GColorWhite);
