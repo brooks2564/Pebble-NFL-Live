@@ -62,7 +62,7 @@ static char s_home_abbr[5]  = "---";
 static int  s_away_score    = 0;
 static int  s_home_score    = 0;
 static int  s_quarter       = 0;
-static char s_clock[8]      = "";
+static char s_clock[12]     = ""; // long enough for "Halftime", not just "15:00"
 static int  s_down          = 0;
 static int  s_distance      = 0;
 static char s_down_text[24] = "";
@@ -632,7 +632,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   t = dict_find(iter, KEY_HOME_SCORE);  if (t) s_home_score = (int)t->value->int32;
   t = dict_find(iter, KEY_QUARTER);     if (t) s_quarter    = (int)t->value->int32;
   t = dict_find(iter, KEY_CLOCK);
-  if (t) { strncpy(s_clock, t->value->cstring, 7); s_clock[7] = 0; }
+  if (t) { strncpy(s_clock, t->value->cstring, 11); s_clock[11] = 0; }
   t = dict_find(iter, KEY_DOWN);        if (t) s_down     = (int)t->value->int32;
   t = dict_find(iter, KEY_DISTANCE);    if (t) s_distance = (int)t->value->int32;
   t = dict_find(iter, KEY_DOWN_TEXT);

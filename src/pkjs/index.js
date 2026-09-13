@@ -557,6 +557,18 @@ function processEvents(data, events, week, abbr) {
   msg[KEY_FEATURED_TAG] = isMyGame ? "" : choice.tag;
   msg[KEY_QUARTER]      = comp.status && comp.status.period ? comp.status.period : 0;
   msg[KEY_CLOCK]        = (comp.status && comp.status.displayClock) || "";
+
+  // Halftime: ESPN flags it via status.type.name, but fall back to
+  // period 2 + a zeroed clock (belt-and-suspenders in case that field is
+  // ever missing/renamed). Quarter 0 makes the watch show just "Halftime"
+  // instead of "Q2 0:00" - see the status_core branch in main.c.
+  var statusTypeName = ((comp.status || {}).type || {}).name || "";
+  var isHalftime = statusTypeName.indexOf("HALFTIME") !== -1 ||
+    (msg[KEY_QUARTER] === 2 && (msg[KEY_CLOCK] === "0:00" || msg[KEY_CLOCK] === ""));
+  if (isHalftime) {
+    msg[KEY_QUARTER] = 0;
+    msg[KEY_CLOCK] = "Halftime";
+  }
   msg[KEY_DOWN]         = 0;
   msg[KEY_DISTANCE]     = 0;
   msg[KEY_DOWN_TEXT]    = "";
