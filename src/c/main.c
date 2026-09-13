@@ -292,7 +292,8 @@ static void draw_halo_text(GContext *ctx, const char *text, GFont font, GRect re
 // dark shading elsewhere), each labeled with its 3-letter abbreviation. A red
 // outline appears for as long as REDZONE is true and disappears the instant
 // it clears — no animation, no timer.
-static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez) {
+static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez,
+                            GFont f_yard, int yard_y) {
 #ifdef PBL_PLATFORM_EMERY
   int ez_w = w * 13 / 100; // ~13% end zone width each side, visually generous
 #else
@@ -301,7 +302,7 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez
   GRect bar = GRect(x, y, w, h);
 
   // Field (middle) background
-  graphics_context_set_fill_color(ctx, GColorDarkGray);
+  graphics_context_set_fill_color(ctx, GColorDarkGreen);
   graphics_fill_rect(ctx, bar, 0, GCornerNone);
 
   // End zones
@@ -331,6 +332,18 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez
     int tx = x + ez_w + (field_w * i) / 10;
     graphics_draw_line(ctx, GPoint(tx, y + h - 4), GPoint(tx, y + h));
   }
+
+  // 20- and 50-yard line labels, just below the field
+  graphics_context_set_text_color(ctx, GColorWhite);
+  int yard20a_x = x + ez_w + (field_w * 20) / 100;
+  int yard50_x  = x + ez_w + (field_w * 50) / 100;
+  int yard20b_x = x + ez_w + (field_w * 80) / 100;
+  graphics_draw_text(ctx, "20", f_yard, GRect(yard20a_x - 10, yard_y, 20, 10),
+    GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_draw_text(ctx, "50", f_yard, GRect(yard50_x - 10, yard_y, 20, 10),
+    GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_draw_text(ctx, "20", f_yard, GRect(yard20b_x - 10, yard_y, 20, 10),
+    GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
   // Ball marker (football icon) + a small arrow showing which way the
   // offense is driving
@@ -374,6 +387,9 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   int w = b.size.w;
   int h = b.size.h;
   int split = h * 3 / 10;
+#ifdef PBL_PLATFORM_EMERY
+  split -= 10; // reclaim room below for a taller field bar + yard labels
+#endif
   int by = split + 2;
 #ifdef PBL_ROUND
   int hpad = 18;
@@ -414,7 +430,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   int score_w = 110, abbr_w = 44, score_h = 36;
   int score_y = by + 2, rec_y = by + 40;
   int status_y = by + 60, detail_y = by + 82, lp_y = by + 102;
-  int fb_y = by + 124, fb_h = 24;
+  int fb_y = by + 124, fb_h = 28;
+  int yard_y = fb_y + fb_h + 1;
   int ticker_top_y = 32, ticker_top_h = 24;
 #else
   GFont f_score = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
@@ -426,7 +443,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   int score_w = 68, abbr_w = 36, score_h = 26;
   int score_y = by, rec_y = by + 28;
   int status_y = by + 42, detail_y = by + 56, lp_y = by + 70;
-  int fb_y = by + 86, fb_h = 14;
+  int fb_y = by + 86, fb_h = 16;
+  int yard_y = fb_y + fb_h + 1;
   int ticker_top_y = 28, ticker_top_h = 18;
 #endif
 
@@ -451,7 +469,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   graphics_context_set_text_color(ctx, GColorLightGray);
   const char *ticker_text = (s_game_count > 0) ? s_games[s_game_idx] : "";
   graphics_draw_text(ctx, ticker_text, f_tiny, GRect(hpad, ticker_top_y, w - 2 * hpad, ticker_top_h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 
   // Away / Home badges (team logo when enabled + available, else abbreviation) + score
   draw_team_badge(ctx, s_away_abbr, f_abbr, GRect(hpad, score_y, abbr_w, score_h),
@@ -524,7 +542,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   }
 
   // Field position bar
-  draw_field_bar(ctx, hpad, fb_y, w - 2 * hpad, fb_h, f_tiny);
+  draw_field_bar(ctx, hpad, fb_y, w - 2 * hpad, fb_h, f_tiny,
+    fonts_get_system_font(FONT_KEY_GOTHIC_09), yard_y);
 }
 
 // ── Clock ────────────────────────────────────────────────────────────────
