@@ -379,9 +379,9 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   // score_y sits far enough below the divider that the logo never paints
   // over it (badges are opaque, unlike text, so they need real clearance).
   int score_w = 110, abbr_w = 44, score_h = 36;
-  int score_y = by + 2, rec_y = by + 26;
-  int status_y = by + 46, detail_y = by + 68, lp_y = by + 88;
-  int fb_y = by + 110, fb_h = 24;
+  int score_y = by + 2, rec_y = by + 40;
+  int status_y = by + 60, detail_y = by + 82, lp_y = by + 102;
+  int fb_y = by + 124, fb_h = 24;
   int ticker_top_y = 32, ticker_top_h = 24;
 #else
   GFont f_score = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
@@ -391,9 +391,9 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   GFont f_tiny  = fonts_get_system_font(FONT_KEY_GOTHIC_14);
   // score_h matches the basalt LG logo (26x26) exactly, same reasoning as above.
   int score_w = 68, abbr_w = 36, score_h = 26;
-  int score_y = by, rec_y = by + 24;
-  int status_y = by + 38, detail_y = by + 52, lp_y = by + 66;
-  int fb_y = by + 82, fb_h = 14;
+  int score_y = by, rec_y = by + 28;
+  int status_y = by + 42, detail_y = by + 56, lp_y = by + 70;
+  int fb_y = by + 86, fb_h = 14;
   int ticker_top_y = 28, ticker_top_h = 18;
 #endif
 
