@@ -26,10 +26,12 @@
 #define KEY_SCORE_EVENT  23
 #define KEY_NETWORK      24
 #define KEY_FEATURED_TAG 25
+#define KEY_TEAM_LOGOS   26
 
-#define PERSIST_TEAM  1
-#define PERSIST_VIB   2
-#define PERSIST_BAT   3
+#define PERSIST_TEAM        1
+#define PERSIST_VIB         2
+#define PERSIST_BAT         3
+#define PERSIST_TEAM_LOGOS  4
 
 #define MAX_GAMES 6
 #define GAME_LEN  26
@@ -72,6 +74,18 @@ static bool s_battery_bar   = true;
 static int  s_battery_pct   = 100;
 static char s_network[24]   = "";
 static char s_featured_tag[5] = ""; // "TNF"/"SNF"/"MNF" when auto-featuring a primetime game
+static bool s_team_logos    = true;
+
+// Cached logo bitmaps — reloaded only when the away/home abbreviation changes
+#ifdef PBL_COLOR
+static GBitmap *s_away_logo_lg = NULL, *s_away_logo_sm = NULL;
+static GBitmap *s_home_logo_lg = NULL, *s_home_logo_sm = NULL;
+static char s_away_logo_abbr[5] = "";
+static char s_home_logo_abbr[5] = "";
+#else
+static GBitmap *s_away_logo_lg = NULL, *s_away_logo_sm = NULL;
+static GBitmap *s_home_logo_lg = NULL, *s_home_logo_sm = NULL;
+#endif
 
 static void request_game_data(void);
 
@@ -154,6 +168,98 @@ static void draw_team_text(GContext *ctx, const char *text, GFont font, GRect re
   graphics_draw_text(ctx, text, font, rect, overflow, align, NULL);
 }
 #endif
+
+// ── Team logos (color platforms only) ───────────────────────────────────────
+// Real ESPN team logos, pre-flattened onto an opaque black square per team,
+// at two exact pixel sizes per platform (LG for the score row, SM for the
+// records-shown slot) — graphics_draw_bitmap_in_rect() clips rather than
+// scales, so each size must match its resource's native dimensions exactly.
+// Emery and basalt each get their own resource set; flint has no logo
+// resources at all, so it always falls back to text below.
+#ifdef PBL_COLOR
+typedef struct { const char *abbr; uint32_t lg_id; uint32_t sm_id; } LogoEntry;
+#if defined(PBL_PLATFORM_EMERY)
+  #define HAVE_LOGOS 1
+  #define LOGO_LG(a) RESOURCE_ID_LOGO_##a##_EM_LG
+  #define LOGO_SM(a) RESOURCE_ID_LOGO_##a##_EM_SM
+#elif defined(PBL_PLATFORM_BASALT)
+  #define HAVE_LOGOS 1
+  #define LOGO_LG(a) RESOURCE_ID_LOGO_##a##_BA_LG
+  #define LOGO_SM(a) RESOURCE_ID_LOGO_##a##_BA_SM
+#endif
+#endif
+
+#ifdef HAVE_LOGOS
+static const LogoEntry LOGO_TABLE[] = {
+  {"ARI", LOGO_LG(ARI), LOGO_SM(ARI)}, {"ATL", LOGO_LG(ATL), LOGO_SM(ATL)},
+  {"BAL", LOGO_LG(BAL), LOGO_SM(BAL)}, {"BUF", LOGO_LG(BUF), LOGO_SM(BUF)},
+  {"CAR", LOGO_LG(CAR), LOGO_SM(CAR)}, {"CHI", LOGO_LG(CHI), LOGO_SM(CHI)},
+  {"CIN", LOGO_LG(CIN), LOGO_SM(CIN)}, {"CLE", LOGO_LG(CLE), LOGO_SM(CLE)},
+  {"DAL", LOGO_LG(DAL), LOGO_SM(DAL)}, {"DEN", LOGO_LG(DEN), LOGO_SM(DEN)},
+  {"DET", LOGO_LG(DET), LOGO_SM(DET)}, {"GB",  LOGO_LG(GB),  LOGO_SM(GB) },
+  {"HOU", LOGO_LG(HOU), LOGO_SM(HOU)}, {"IND", LOGO_LG(IND), LOGO_SM(IND)},
+  {"JAX", LOGO_LG(JAX), LOGO_SM(JAX)}, {"KC",  LOGO_LG(KC),  LOGO_SM(KC) },
+  {"LV",  LOGO_LG(LV),  LOGO_SM(LV) }, {"LAC", LOGO_LG(LAC), LOGO_SM(LAC)},
+  {"LAR", LOGO_LG(LAR), LOGO_SM(LAR)}, {"MIA", LOGO_LG(MIA), LOGO_SM(MIA)},
+  {"MIN", LOGO_LG(MIN), LOGO_SM(MIN)}, {"NE",  LOGO_LG(NE),  LOGO_SM(NE) },
+  {"NO",  LOGO_LG(NO),  LOGO_SM(NO) }, {"NYG", LOGO_LG(NYG), LOGO_SM(NYG)},
+  {"NYJ", LOGO_LG(NYJ), LOGO_SM(NYJ)}, {"PHI", LOGO_LG(PHI), LOGO_SM(PHI)},
+  {"PIT", LOGO_LG(PIT), LOGO_SM(PIT)}, {"SF",  LOGO_LG(SF),  LOGO_SM(SF) },
+  {"SEA", LOGO_LG(SEA), LOGO_SM(SEA)}, {"TB",  LOGO_LG(TB),  LOGO_SM(TB) },
+  {"TEN", LOGO_LG(TEN), LOGO_SM(TEN)}, {"WSH", LOGO_LG(WSH), LOGO_SM(WSH)},
+};
+#define LOGO_TABLE_LEN (int)(sizeof(LOGO_TABLE)/sizeof(LOGO_TABLE[0]))
+
+static void find_logo_resources(const char *abbr, uint32_t *lg, uint32_t *sm) {
+  *lg = 0; *sm = 0;
+  for (int i = 0; i < LOGO_TABLE_LEN; i++)
+    if (strcmp(LOGO_TABLE[i].abbr, abbr) == 0) { *lg = LOGO_TABLE[i].lg_id; *sm = LOGO_TABLE[i].sm_id; return; }
+}
+
+static void set_team_logo(GBitmap **bmp_lg, GBitmap **bmp_sm, char *cached_abbr, const char *abbr) {
+  if (strcmp(cached_abbr, abbr) == 0) return; // already loaded
+  if (*bmp_lg) { gbitmap_destroy(*bmp_lg); *bmp_lg = NULL; }
+  if (*bmp_sm) { gbitmap_destroy(*bmp_sm); *bmp_sm = NULL; }
+  strncpy(cached_abbr, abbr, 4); cached_abbr[4] = 0;
+  uint32_t lg, sm;
+  find_logo_resources(abbr, &lg, &sm);
+  if (lg) *bmp_lg = gbitmap_create_with_resource(lg);
+  if (sm) *bmp_sm = gbitmap_create_with_resource(sm);
+}
+
+static void update_team_logos(void) {
+  set_team_logo(&s_away_logo_lg, &s_away_logo_sm, s_away_logo_abbr, s_away_abbr);
+  set_team_logo(&s_home_logo_lg, &s_home_logo_sm, s_home_logo_abbr, s_home_abbr);
+}
+#else
+static void update_team_logos(void) { }
+#endif
+
+// Draws a team's logo (if enabled + available) or falls back to its 3-letter
+// abbreviation. Logos are drawn at their native resource size (never
+// stretched/clipped), centered in rect and anchored per alignment.
+static void draw_team_badge(GContext *ctx, const char *abbr, GFont font, GRect rect,
+                             GTextOverflowMode overflow, GTextAlignment align,
+                             GBitmap *logo_lg, GBitmap *logo_sm, bool use_large) {
+#ifdef HAVE_LOGOS
+  GBitmap *logo = use_large ? logo_lg : logo_sm;
+  if (s_team_logos && logo) {
+    GRect b = gbitmap_get_bounds(logo);
+    int x = rect.origin.x;
+    if (align == GTextAlignmentRight) x = rect.origin.x + rect.size.w - b.size.w;
+    else if (align == GTextAlignmentCenter) x = rect.origin.x + (rect.size.w - b.size.w) / 2;
+    int y = rect.origin.y + (rect.size.h - b.size.h) / 2;
+    graphics_draw_bitmap_in_rect(ctx, logo, GRect(x, y, b.size.w, b.size.h));
+    return;
+  }
+#endif
+#ifdef PBL_PLATFORM_EMERY
+  draw_team_text(ctx, abbr, font, rect, overflow, align, team_color(abbr));
+#else
+  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_draw_text(ctx, abbr, font, rect, overflow, align, NULL);
+#endif
+}
 
 // ── Field position bar ──────────────────────────────────────────────────────
 // 0 = away team's own goal line (left edge), 100 = home team's own goal line
@@ -309,19 +415,13 @@ static void canvas_update(Layer *layer, GContext *ctx) {
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
-  // Away / Home abbreviations + score
-#ifdef PBL_PLATFORM_EMERY
-  draw_team_text(ctx, s_away_abbr, f_abbr, GRect(hpad, score_y, abbr_w, score_h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, team_color(s_away_abbr));
-  draw_team_text(ctx, s_home_abbr, f_abbr, GRect(w - abbr_w - hpad, score_y, abbr_w, score_h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, team_color(s_home_abbr));
-#else
-  graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(ctx, s_away_abbr, f_abbr, GRect(hpad, score_y, abbr_w, score_h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-  graphics_draw_text(ctx, s_home_abbr, f_abbr, GRect(w - abbr_w - hpad, score_y, abbr_w, score_h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
-#endif
+  // Away / Home badges (team logo when enabled + available, else abbreviation) + score
+  draw_team_badge(ctx, s_away_abbr, f_abbr, GRect(hpad, score_y, abbr_w, score_h),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft,
+    s_away_logo_lg, s_away_logo_sm, true);
+  draw_team_badge(ctx, s_home_abbr, f_abbr, GRect(w - abbr_w - hpad, score_y, abbr_w, score_h),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentRight,
+    s_home_logo_lg, s_home_logo_sm, true);
 
   if (!off_now) {
     char sbuf[16];
@@ -426,6 +526,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if (t) { strncpy(s_away_abbr, t->value->cstring, 4); s_away_abbr[4] = 0; }
   t = dict_find(iter, KEY_HOME_ABBR);
   if (t) { strncpy(s_home_abbr, t->value->cstring, 4); s_home_abbr[4] = 0; }
+  update_team_logos();
   t = dict_find(iter, KEY_AWAY_SCORE);  if (t) s_away_score = (int)t->value->int32;
   t = dict_find(iter, KEY_HOME_SCORE);  if (t) s_home_score = (int)t->value->int32;
   t = dict_find(iter, KEY_QUARTER);     if (t) s_quarter    = (int)t->value->int32;
@@ -454,6 +555,8 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if (t) { strncpy(s_next_game, t->value->cstring, 23); s_next_game[23] = 0; }
   t = dict_find(iter, KEY_BATTERY_BAR);
   if (t) { s_battery_bar = (bool)t->value->int32; persist_write_bool(PERSIST_BAT, s_battery_bar); }
+  t = dict_find(iter, KEY_TEAM_LOGOS);
+  if (t) { s_team_logos = (bool)t->value->int32; persist_write_bool(PERSIST_TEAM_LOGOS, s_team_logos); }
   t = dict_find(iter, KEY_NETWORK);
   if (t) { strncpy(s_network, t->value->cstring, 23); s_network[23] = 0; }
   t = dict_find(iter, KEY_FEATURED_TAG);
@@ -504,14 +607,19 @@ static void window_load(Window *window) {
 static void window_unload(Window *window) {
   if (s_ticker_timer) { app_timer_cancel(s_ticker_timer); s_ticker_timer = NULL; }
   if (s_canvas) { layer_destroy(s_canvas); s_canvas = NULL; }
+  if (s_away_logo_lg) { gbitmap_destroy(s_away_logo_lg); s_away_logo_lg = NULL; }
+  if (s_away_logo_sm) { gbitmap_destroy(s_away_logo_sm); s_away_logo_sm = NULL; }
+  if (s_home_logo_lg) { gbitmap_destroy(s_home_logo_lg); s_home_logo_lg = NULL; }
+  if (s_home_logo_sm) { gbitmap_destroy(s_home_logo_sm); s_home_logo_sm = NULL; }
 }
 
 static void init(void) {
   memset(s_ticker_raw, 0, sizeof(s_ticker_raw));
 
-  if (persist_exists(PERSIST_TEAM)) s_team_idx    = persist_read_int(PERSIST_TEAM);
-  if (persist_exists(PERSIST_VIB))  s_vibrate     = persist_read_bool(PERSIST_VIB);
-  if (persist_exists(PERSIST_BAT))  s_battery_bar = persist_read_bool(PERSIST_BAT);
+  if (persist_exists(PERSIST_TEAM))        s_team_idx    = persist_read_int(PERSIST_TEAM);
+  if (persist_exists(PERSIST_VIB))         s_vibrate     = persist_read_bool(PERSIST_VIB);
+  if (persist_exists(PERSIST_BAT))         s_battery_bar = persist_read_bool(PERSIST_BAT);
+  if (persist_exists(PERSIST_TEAM_LOGOS))  s_team_logos  = persist_read_bool(PERSIST_TEAM_LOGOS);
 
   time_t now = time(NULL);
   update_clock(localtime(&now));

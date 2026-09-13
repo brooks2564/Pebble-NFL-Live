@@ -30,6 +30,7 @@ var KEY_DOWN_TEXT    = 22;
 var KEY_SCORE_EVENT  = 23;
 var KEY_NETWORK      = 24;
 var KEY_FEATURED_TAG = 25;
+var KEY_TEAM_LOGOS   = 26;
 
 var SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
 var SUMMARY_URL    = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary";
@@ -74,6 +75,7 @@ var gTeamIdx       = 15;   // KC
 var gVibrate       = true;
 var gBatteryBar    = true;
 var gPrimetimeAuto = true;
+var gTeamLogos     = true;
 
 function loadFromClay() {
   var cs = {};
@@ -83,6 +85,7 @@ function loadFromClay() {
   if (cs.VIBRATE        !== undefined) gVibrate       = !!cs.VIBRATE;
   if (cs.BATTERY_BAR    !== undefined) gBatteryBar    = !!cs.BATTERY_BAR;
   if (cs.PRIMETIME_AUTO !== undefined) gPrimetimeAuto = !!cs.PRIMETIME_AUTO;
+  if (cs.TEAM_LOGOS     !== undefined) gTeamLogos     = !!cs.TEAM_LOGOS;
 }
 loadFromClay();
 
@@ -459,6 +462,7 @@ function processEvents(data, events, week, abbr) {
   msg[KEY_HOME_RECORD]  = recordFor(homeC);
   msg[KEY_VIBRATE]      = gVibrate ? 1 : 0;
   msg[KEY_BATTERY_BAR]  = gBatteryBar ? 1 : 0;
+  msg[KEY_TEAM_LOGOS]   = gTeamLogos ? 1 : 0;
   msg[KEY_NETWORK]      = getNetwork(comp.broadcasts);
   msg[KEY_TICKER]       = buildTicker(events, awayAbbr, homeAbbr);
   msg[KEY_NEXT_GAME]    = "";

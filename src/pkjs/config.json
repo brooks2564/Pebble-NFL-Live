@@ -82,6 +82,23 @@
     "items": [
       {
         "type": "heading",
+        "defaultValue": "Display",
+        "size": 4
+      },
+      {
+        "type": "toggle",
+        "messageKey": "TEAM_LOGOS",
+        "label": "Team Logos",
+        "description": "Show team logos instead of 3-letter abbreviations (color platforms only)",
+        "defaultValue": true
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
         "defaultValue": "Primetime",
         "size": 4
       },
