@@ -25,6 +25,7 @@
 #define KEY_DOWN_TEXT    22
 #define KEY_SCORE_EVENT  23
 #define KEY_NETWORK      24
+#define KEY_FEATURED_TAG 25
 
 #define PERSIST_TEAM  1
 #define PERSIST_VIB   2
@@ -70,6 +71,7 @@ static char s_next_game[24] = "";
 static bool s_battery_bar   = true;
 static int  s_battery_pct   = 100;
 static char s_network[24]   = "";
+static char s_featured_tag[5] = ""; // "TNF"/"SNF"/"MNF" when auto-featuring a primetime game
 
 static void request_game_data(void);
 
@@ -299,6 +301,14 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     GRect(56, 2, w - 56 - hpad, 20), GTextOverflowModeWordWrap, GTextAlignmentRight, NULL);
 #endif
 
+  // Primetime badge — shown only when Auto-Show Primetime Games has switched
+  // the screen to tonight's TNF/SNF/MNF game instead of your own team
+  if (s_featured_tag[0]) {
+    graphics_context_set_text_color(ctx, GColorYellow);
+    graphics_draw_text(ctx, s_featured_tag, f_tiny, GRect(hpad, split - 16, w - 2 * hpad, 14),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
   // Away / Home abbreviations + score
 #ifdef PBL_PLATFORM_EMERY
   draw_team_text(ctx, s_away_abbr, f_abbr, GRect(hpad, score_y, abbr_w, score_h),
@@ -446,6 +456,8 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if (t) { s_battery_bar = (bool)t->value->int32; persist_write_bool(PERSIST_BAT, s_battery_bar); }
   t = dict_find(iter, KEY_NETWORK);
   if (t) { strncpy(s_network, t->value->cstring, 23); s_network[23] = 0; }
+  t = dict_find(iter, KEY_FEATURED_TAG);
+  if (t) { strncpy(s_featured_tag, t->value->cstring, 4); s_featured_tag[4] = 0; }
   t = dict_find(iter, KEY_TICKER);
   if (t) {
     strncpy(s_ticker_raw, t->value->cstring, sizeof(s_ticker_raw) - 1);

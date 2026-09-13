@@ -53,7 +53,8 @@
       "TICKER": 21,
       "DOWN_TEXT": 22,
       "SCORE_EVENT": 23,
-      "NETWORK": 24
+      "NETWORK": 24,
+      "FEATURED_TAG": 25
     },
     "resources": {
       "media": []

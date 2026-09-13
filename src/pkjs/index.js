@@ -29,6 +29,7 @@ var KEY_TICKER       = 21;
 var KEY_DOWN_TEXT    = 22;
 var KEY_SCORE_EVENT  = 23;
 var KEY_NETWORK      = 24;
+var KEY_FEATURED_TAG = 25;
 
 var SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
 var SUMMARY_URL    = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary";
@@ -69,17 +70,19 @@ var TEAMS = [
 ];
 
 // ── Saved state ────────────────────────────────────────────────────────────
-var gTeamIdx    = 15;   // KC
-var gVibrate    = true;
-var gBatteryBar = true;
+var gTeamIdx       = 15;   // KC
+var gVibrate       = true;
+var gBatteryBar    = true;
+var gPrimetimeAuto = true;
 
 function loadFromClay() {
   var cs = {};
   try { cs = JSON.parse(localStorage.getItem("clay-settings")) || {}; } catch(e) {}
   var pIdx = parseInt(cs.TEAM_IDX, 10);
   if (!isNaN(pIdx) && pIdx >= 0 && pIdx < TEAMS.length) gTeamIdx = pIdx;
-  if (cs.VIBRATE     !== undefined) gVibrate    = !!cs.VIBRATE;
-  if (cs.BATTERY_BAR !== undefined) gBatteryBar = !!cs.BATTERY_BAR;
+  if (cs.VIBRATE        !== undefined) gVibrate       = !!cs.VIBRATE;
+  if (cs.BATTERY_BAR    !== undefined) gBatteryBar    = !!cs.BATTERY_BAR;
+  if (cs.PRIMETIME_AUTO !== undefined) gPrimetimeAuto = !!cs.PRIMETIME_AUTO;
 }
 loadFromClay();
 
@@ -180,6 +183,70 @@ function findTeamEvent(events, abbr) {
   return null;
 }
 
+// ── Primetime detection (TNF / SNF / MNF) ──────────────────────────────────
+// True once `isoStr` is within `minutes` from now (and hasn't already passed).
+function isWithinMinutes(isoStr, minutes) {
+  if (!isoStr) return false;
+  try {
+    var gameMs = new Date(isoStr).getTime();
+    var nowMs  = Date.now();
+    return gameMs > nowMs && (gameMs - nowMs) <= minutes * 60 * 1000;
+  } catch(e) { return false; }
+}
+
+function networkNamesLower(broadcasts) {
+  var names = [];
+  for (var i = 0; i < (broadcasts || []).length; i++) {
+    for (var j = 0; j < (broadcasts[i].names || []).length; j++) {
+      names.push(String(broadcasts[i].names[j]).toLowerCase());
+    }
+  }
+  return names.join(" ");
+}
+
+function primetimeTagForDay(dow) {
+  return dow === 4 ? "TNF" : dow === 1 ? "MNF" : dow === 0 ? "SNF" : "";
+}
+
+// Finds today's featured primetime game, if today (local time) is a
+// Thursday/Sunday/Monday. When more than one game airs today (Sunday
+// afternoon slates, a Thanksgiving tripleheader), prefer whichever one is on
+// the network that traditionally carries that night's primetime game; fall
+// back to the single latest kickoff of the day if no network matches.
+var PRIMETIME_NETWORK_KEYWORDS = {
+  4: ["prime video", "amazon", "nfl network"], // Thursday
+  0: ["nbc"],                                   // Sunday night
+  1: ["espn", "abc"]                            // Monday night
+};
+
+function findPrimetimeEvent(events) {
+  var dow = new Date().getDay();
+  var keywords = PRIMETIME_NETWORK_KEYWORDS[dow];
+  if (!keywords) return null; // not a primetime day at all
+
+  var todays = [];
+  for (var i = 0; i < events.length; i++) {
+    var d = new Date(events[i].competitions[0].date);
+    if (!isNaN(d.getTime()) && d.getDay() === dow) todays.push(events[i]);
+  }
+  if (todays.length === 0) return null;
+  if (todays.length === 1) return { event: todays[0], tag: primetimeTagForDay(dow) };
+
+  for (var j = 0; j < todays.length; j++) {
+    var nets = networkNamesLower(todays[j].competitions[0].broadcasts);
+    for (var k = 0; k < keywords.length; k++) {
+      if (nets.indexOf(keywords[k]) !== -1) return { event: todays[j], tag: primetimeTagForDay(dow) };
+    }
+  }
+
+  // No recognized network match — fall back to the day's latest kickoff
+  var latest = todays[0];
+  for (var m = 1; m < todays.length; m++) {
+    if (new Date(todays[m].competitions[0].date) > new Date(latest.competitions[0].date)) latest = todays[m];
+  }
+  return { event: latest, tag: primetimeTagForDay(dow) };
+}
+
 // Pick best TV network: national broadcast first, else whatever is listed
 function getNetwork(broadcasts) {
   if (!broadcasts || !broadcasts.length) return "";
@@ -214,7 +281,9 @@ function computeFieldPos(situation, awayAbbr, homeAbbr) {
 }
 
 // ── Ticker builder (other games this week) ──────────────────────────────────
-function buildTicker(events, myAbbr) {
+// Excludes whichever game is already the main on-screen game (normally your
+// own team; the featured primetime game when Primetime Auto has taken over).
+function buildTicker(events, excludeAwayAbbr, excludeHomeAbbr) {
   var parts = [];
   for (var i = 0; i < events.length; i++) {
     var comp  = events[i].competitions[0];
@@ -222,7 +291,7 @@ function buildTicker(events, myAbbr) {
     var homeC = competitorFor(comp, "home");
     var away  = (awayC.team || {}).abbreviation || "";
     var home  = (homeC.team || {}).abbreviation || "";
-    if (away === myAbbr || home === myAbbr) continue;
+    if ((away === excludeAwayAbbr && home === excludeHomeAbbr)) continue;
 
     var st = ((comp.status || {}).type || {});
     var entry = "";
@@ -326,11 +395,44 @@ function buildNextGameText(ev, abbr) {
   return text.length > 23 ? text.substring(0, 23) : text;
 }
 
+function stateOf(comp) {
+  var t = (comp.status || {}).type || {};
+  return t.state === "in" ? "live" : t.state === "post" ? "final" : t.state === "pre" ? "pre" : "off";
+}
+
+// Decide which game to actually put on screen: normally your own team's game
+// (or `null` on a bye), but if Primetime Auto is on, your team isn't
+// currently live, and today's TNF/SNF/MNF game is live or kicking off soon,
+// feature that instead. The moment the primetime game goes final (or your
+// own game goes live), this naturally reverts on the next minute's fetch —
+// there is no separate "revert" step.
+function chooseFeaturedEvent(myEvent, events, abbr) {
+  var myLive = myEvent && stateOf(myEvent.competitions[0]) === "live";
+  if (!gPrimetimeAuto || myLive) return { event: myEvent, tag: "" };
+
+  var pt = findPrimetimeEvent(events);
+  if (!pt || !pt.event) return { event: myEvent, tag: "" };
+
+  var ptComp  = pt.event.competitions[0];
+  var ptAway  = (competitorFor(ptComp, "away").team || {}).abbreviation || "";
+  var ptHome  = (competitorFor(ptComp, "home").team || {}).abbreviation || "";
+  if (ptAway === abbr || ptHome === abbr) return { event: myEvent, tag: "" }; // it IS my team's game
+
+  var ptState = stateOf(ptComp);
+  var ptSoon  = ptState === "live" || (ptState === "pre" && isWithinMinutes(ptComp.date, 120));
+  if (!ptSoon) return { event: myEvent, tag: "" };
+
+  return { event: pt.event, tag: pt.tag };
+}
+
 function processEvents(data, events, week, abbr) {
-  var ev = findTeamEvent(events, abbr);
+  var myEvent = findTeamEvent(events, abbr);
+  var choice  = chooseFeaturedEvent(myEvent, events, abbr);
+  var ev      = choice.event;
+  var isMyGame = !!(ev && ev === myEvent);
 
   if (!ev) {
-    // Bye week — look ahead up to 3 weeks for the next scheduled game
+    // Bye week, and no primetime game is live/imminent right now either.
     findNextGame(week, abbr, 3, function(nextEv) {
       sendOffMessage(nextEv ? buildNextGameText(nextEv, abbr) : "Bye Week");
     });
@@ -344,35 +446,33 @@ function processEvents(data, events, week, abbr) {
   var homeAbbr = (homeC.team || {}).abbreviation || "---";
   var isUserAway = (awayAbbr === abbr);
 
-  var statusType = (comp.status || {}).type || {};
-  var status = statusType.state === "in"   ? "live"
-             : statusType.state === "post" ? "final"
-             : statusType.state === "pre"  ? "pre" : "off";
+  var status = stateOf(comp);
 
   var msg = {};
-  msg[KEY_AWAY_ABBR]   = awayAbbr;
-  msg[KEY_HOME_ABBR]   = homeAbbr;
-  msg[KEY_AWAY_SCORE]  = parseInt(awayC.score, 10) || 0;
-  msg[KEY_HOME_SCORE]  = parseInt(homeC.score, 10) || 0;
-  msg[KEY_STATUS]      = status;
-  msg[KEY_START_TIME]  = formatStartTime(comp.date || "");
-  msg[KEY_AWAY_RECORD] = recordFor(awayC);
-  msg[KEY_HOME_RECORD] = recordFor(homeC);
-  msg[KEY_VIBRATE]     = gVibrate ? 1 : 0;
-  msg[KEY_BATTERY_BAR] = gBatteryBar ? 1 : 0;
-  msg[KEY_NETWORK]     = getNetwork(comp.broadcasts);
-  msg[KEY_TICKER]      = buildTicker(events, abbr);
-  msg[KEY_NEXT_GAME]   = "";
-  msg[KEY_QUARTER]     = comp.status && comp.status.period ? comp.status.period : 0;
-  msg[KEY_CLOCK]       = (comp.status && comp.status.displayClock) || "";
-  msg[KEY_DOWN]        = 0;
-  msg[KEY_DISTANCE]    = 0;
-  msg[KEY_DOWN_TEXT]   = "";
-  msg[KEY_FIELD_POS]   = 50;
-  msg[KEY_REDZONE]     = 0;
-  msg[KEY_POSSESSION]  = 2; // none
-  msg[KEY_LAST_PLAY]   = "";
-  msg[KEY_SCORE_EVENT] = 0;
+  msg[KEY_AWAY_ABBR]    = awayAbbr;
+  msg[KEY_HOME_ABBR]    = homeAbbr;
+  msg[KEY_AWAY_SCORE]   = parseInt(awayC.score, 10) || 0;
+  msg[KEY_HOME_SCORE]   = parseInt(homeC.score, 10) || 0;
+  msg[KEY_STATUS]       = status;
+  msg[KEY_START_TIME]   = formatStartTime(comp.date || "");
+  msg[KEY_AWAY_RECORD]  = recordFor(awayC);
+  msg[KEY_HOME_RECORD]  = recordFor(homeC);
+  msg[KEY_VIBRATE]      = gVibrate ? 1 : 0;
+  msg[KEY_BATTERY_BAR]  = gBatteryBar ? 1 : 0;
+  msg[KEY_NETWORK]      = getNetwork(comp.broadcasts);
+  msg[KEY_TICKER]       = buildTicker(events, awayAbbr, homeAbbr);
+  msg[KEY_NEXT_GAME]    = "";
+  msg[KEY_FEATURED_TAG] = isMyGame ? "" : choice.tag;
+  msg[KEY_QUARTER]      = comp.status && comp.status.period ? comp.status.period : 0;
+  msg[KEY_CLOCK]        = (comp.status && comp.status.displayClock) || "";
+  msg[KEY_DOWN]         = 0;
+  msg[KEY_DISTANCE]     = 0;
+  msg[KEY_DOWN_TEXT]    = "";
+  msg[KEY_FIELD_POS]    = 50;
+  msg[KEY_REDZONE]      = 0;
+  msg[KEY_POSSESSION]   = 2; // none
+  msg[KEY_LAST_PLAY]    = "";
+  msg[KEY_SCORE_EVENT]  = 0;
 
   var situation = comp.situation;
   if (situation) {
@@ -398,20 +498,22 @@ function processEvents(data, events, week, abbr) {
     }
   }
 
-  // Final: figure out next game for next week
-  if (status === "final") {
+  // Final: figure out next game for next week (only meaningful for MY team)
+  if (status === "final" && isMyGame) {
     findNextGame(week, abbr, 2, function(nextEv) {
       if (nextEv) msg[KEY_NEXT_GAME] = buildNextGameText(nextEv, abbr);
-      finishSend(status, ev, msg, isUserAway ? awayAbbr : homeAbbr);
+      finishSend(status, ev, msg, isMyGame, isUserAway ? awayAbbr : homeAbbr);
     });
     return;
   }
 
-  finishSend(status, ev, msg, isUserAway ? awayAbbr : homeAbbr);
+  finishSend(status, ev, msg, isMyGame, isUserAway ? awayAbbr : homeAbbr);
 }
 
-function finishSend(status, ev, msg, myAbbr) {
-  if (status === "live" && ev.id) {
+// Only ever check for a scoring buzz when the featured game is actually MY
+// team's game — watching someone else's primetime game should never vibrate.
+function finishSend(status, ev, msg, isMyGame, myAbbr) {
+  if (status === "live" && isMyGame && ev.id) {
     fetchSummary(ev.id, function(summaryData) {
       msg[KEY_SCORE_EVENT] = checkScoreEvent(summaryData, ev.id, myAbbr);
       sendMessage(msg);

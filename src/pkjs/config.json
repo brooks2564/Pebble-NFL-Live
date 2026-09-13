@@ -78,6 +78,23 @@
     ]
   },
   {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Primetime",
+        "size": 4
+      },
+      {
+        "type": "toggle",
+        "messageKey": "PRIMETIME_AUTO",
+        "label": "Auto-Show Primetime Games",
+        "description": "When your team isn't playing right now, automatically switch to Thursday/Sunday/Monday night football",
+        "defaultValue": true
+      }
+    ]
+  },
+  {
     "type": "submit",
     "defaultValue": "Save Settings"
   }
