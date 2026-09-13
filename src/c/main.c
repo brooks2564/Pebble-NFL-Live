@@ -1,6 +1,6 @@
 #include <pebble.h>
 
-// ── Message keys — must match src/pkjs/index.js exactly ────────────────────
+// ── Message keys - must match src/pkjs/index.js exactly ────────────────────
 #define KEY_AWAY_ABBR    1
 #define KEY_HOME_ABBR    2
 #define KEY_AWAY_SCORE   3
@@ -28,6 +28,8 @@
 #define KEY_FEATURED_TAG 25
 #define KEY_TEAM_LOGOS   26
 #define KEY_TICKER_SPEED 27
+#define KEY_AWAY_STATS   28
+#define KEY_HOME_STATS   29
 
 #define PERSIST_TEAM         1
 #define PERSIST_VIB          2
@@ -43,7 +45,7 @@ static Layer  *s_canvas;
 static AppTimer *s_ticker_timer;
 static int s_ticker_speed = 5000; // ms between ticker advances (default 5s)
 
-// Ticker state — parsed from the pipe-delimited TICKER string
+// Ticker state - parsed from the pipe-delimited TICKER string
 static char s_ticker_raw[200];
 static char s_games[MAX_GAMES][GAME_LEN];
 static int  s_game_count;
@@ -77,8 +79,13 @@ static int  s_battery_pct   = 100;
 static char s_network[24]   = "";
 static char s_featured_tag[5] = ""; // "TNF"/"SNF"/"MNF" when auto-featuring a primetime game
 static bool s_team_logos    = true;
+static char s_away_stats[20] = ""; // "P:123 R:45"
+static char s_home_stats[20] = "";
+static bool s_stats_toggle  = false; // flips each MINUTE_UNIT tick - alternates
+                                      // the down/last-play rows with the
+                                      // passing/rushing stat lines
 
-// Cached logo bitmaps — reloaded only when the away/home abbreviation changes
+// Cached logo bitmaps - reloaded only when the away/home abbreviation changes
 #ifdef PBL_COLOR
 static GBitmap *s_away_logo_lg = NULL, *s_away_logo_sm = NULL;
 static GBitmap *s_home_logo_lg = NULL, *s_home_logo_sm = NULL;
@@ -128,7 +135,7 @@ static void ticker_advance(void *ctx) {
   s_ticker_timer = app_timer_register((uint32_t)s_ticker_speed, ticker_advance, NULL);
 }
 
-// ── Team colors (emery only — see MLB blueprint precedent) ─────────────────
+// ── Team colors (emery only - see MLB blueprint precedent) ─────────────────
 #ifdef PBL_PLATFORM_EMERY
 static GColor team_color(const char *abbr) {
   if (!abbr) return GColorWhite;
@@ -183,7 +190,7 @@ static void draw_team_text(GContext *ctx, const char *text, GFont font, GRect re
 // ── Team logos (color platforms only) ───────────────────────────────────────
 // Real ESPN team logos, pre-flattened onto an opaque black square per team,
 // at two exact pixel sizes per platform (LG for the score row, SM for the
-// records-shown slot) — graphics_draw_bitmap_in_rect() clips rather than
+// records-shown slot) - graphics_draw_bitmap_in_rect() clips rather than
 // scales, so each size must match its resource's native dimensions exactly.
 // Emery and basalt each get their own resource set; flint has no logo
 // resources at all, so it always falls back to text below.
@@ -272,9 +279,9 @@ static void draw_team_badge(GContext *ctx, const char *abbr, GFont font, GRect r
 #endif
 }
 
-// White-on-black-outline halo text — legible over any background color,
+// White-on-black-outline halo text - legible over any background color,
 // which is exactly what the endzone abbreviations need since they sit on
-// top of each team's own (highly variable) color. Emery-only — see its call
+// top of each team's own (highly variable) color. Emery-only - see its call
 // site in draw_field_bar.
 #ifdef PBL_PLATFORM_EMERY
 static void draw_halo_text(GContext *ctx, const char *text, GFont font, GRect rect) {
@@ -294,7 +301,7 @@ static void draw_halo_text(GContext *ctx, const char *text, GFont font, GRect re
 // (right edge). End zones are shaded in each team's color on emery (generic
 // dark shading elsewhere), each labeled with its 3-letter abbreviation. A red
 // outline appears for as long as REDZONE is true and disappears the instant
-// it clears — no animation, no timer.
+// it clears - no animation, no timer.
 static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez,
                             GFont f_yard, int yard_y) {
 #ifdef PBL_PLATFORM_EMERY
@@ -320,7 +327,7 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez
   graphics_fill_rect(ctx, GRect(x + w - ez_w, y, ez_w, h), 0, GCornerNone);
 #endif
 
-  // Endzone abbreviations — white-on-black halo reads over any team color.
+  // Endzone abbreviations - white-on-black halo reads over any team color.
   // Emery-only: the smaller platforms' endzones aren't wide enough to fit a
   // 3-letter abbreviation without truncating it, so skip it there entirely
   // rather than show a cut-off "D...".
@@ -372,7 +379,7 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez
     }
   }
 
-  // Red zone outline — on while REDZONE is true, off the moment it clears
+  // Red zone outline - on while REDZONE is true, off the moment it clears
 #ifdef PBL_COLOR
   GColor rz_color = GColorRed;
 #else
@@ -472,7 +479,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     GRect(56, 2, w - 56 - hpad, 20), GTextOverflowModeWordWrap, GTextAlignmentRight, NULL);
 #endif
 
-  // Ticker — other games this week, cycling every few seconds. Same slot as
+  // Ticker - other games this week, cycling every few seconds. Same slot as
   // the MLB watchface: directly under the time/date row, above the divider.
   graphics_context_set_text_color(ctx, GColorLightGray);
   const char *ticker_text = (s_game_count > 0) ? s_games[s_game_idx] : "";
@@ -525,10 +532,17 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   graphics_draw_text(ctx, status_buf, f_mid, GRect(hpad, status_y, w - 2 * hpad, 26),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
-  // Detail row: down & distance (live), network (pre), next game (final)
+  // Detail + last-play rows: down & distance / last play (live), network
+  // (pre), next game (final/bye) - on a live game, these two rows swap to
+  // each team's passing/rushing line once a minute instead (see
+  // s_stats_toggle in tick_handler), no extra screen space needed.
+  bool show_stats = live_now && s_stats_toggle && (s_away_stats[0] || s_home_stats[0]);
+
   graphics_context_set_text_color(ctx, GColorLightGray);
   char detail_buf[32] = "";
-  if (live_now && s_down_text[0]) {
+  if (show_stats) {
+    snprintf(detail_buf, sizeof(detail_buf), "%s %s", s_away_abbr, s_away_stats);
+  } else if (live_now && s_down_text[0]) {
     snprintf(detail_buf, sizeof(detail_buf), "%s", s_down_text);
   } else if (pre_now && s_network[0]) {
     snprintf(detail_buf, sizeof(detail_buf), "%s", s_network);
@@ -542,8 +556,14 @@ static void canvas_update(Layer *layer, GContext *ctx) {
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
-  // Last play
-  if (live_now && s_last_play[0]) {
+  // Last play (or the home team's stat line during the stats phase)
+  if (show_stats) {
+    char home_stat_buf[32];
+    snprintf(home_stat_buf, sizeof(home_stat_buf), "%s %s", s_home_abbr, s_home_stats);
+    graphics_context_set_text_color(ctx, GColorLightGray);
+    graphics_draw_text(ctx, home_stat_buf, f_tiny, GRect(hpad, lp_y, w - 2 * hpad, 18),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  } else if (live_now && s_last_play[0]) {
     graphics_context_set_text_color(ctx, GColorLightGray);
     graphics_draw_text(ctx, s_last_play, f_tiny, GRect(hpad, lp_y, w - 2 * hpad, 18),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
@@ -562,14 +582,17 @@ static void update_clock(struct tm *t) {
 
 static void tick_handler(struct tm *t, TimeUnits units) {
   update_clock(t);
-  if (units & MINUTE_UNIT) request_game_data();
+  if (units & MINUTE_UNIT) {
+    request_game_data();
+    s_stats_toggle = !s_stats_toggle;
+  }
   if (s_canvas) layer_mark_dirty(s_canvas);
 }
 
 // ── Vibration ────────────────────────────────────────────────────────────
 // 1 short buzz for a field goal or safety, 3 short buzzes for a touchdown.
 // No buzz at all for PATs / two-point tries (they never produce a distinct
-// score_event — see checkScoreEvent() in index.js).
+// score_event - see checkScoreEvent() in index.js).
 static void fire_score_vibe(int score_event) {
   if (!s_vibrate || score_event <= 0) return;
   if (score_event == 2) {
@@ -617,6 +640,10 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if (t) { s_vibrate = (bool)t->value->int32; persist_write_bool(PERSIST_VIB, s_vibrate); }
   t = dict_find(iter, KEY_LAST_PLAY);
   if (t) { strncpy(s_last_play, t->value->cstring, 43); s_last_play[43] = 0; }
+  t = dict_find(iter, KEY_AWAY_STATS);
+  if (t) { strncpy(s_away_stats, t->value->cstring, 19); s_away_stats[19] = 0; }
+  t = dict_find(iter, KEY_HOME_STATS);
+  if (t) { strncpy(s_home_stats, t->value->cstring, 19); s_home_stats[19] = 0; }
   t = dict_find(iter, KEY_NEXT_GAME);
   if (t) { strncpy(s_next_game, t->value->cstring, 31); s_next_game[31] = 0; }
   t = dict_find(iter, KEY_BATTERY_BAR);

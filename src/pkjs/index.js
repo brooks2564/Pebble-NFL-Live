@@ -2,7 +2,7 @@
 // Data source: ESPN's public scoreboard/summary API (free, no key required)
 var Clay = require('pebble-clay');
 var clayConfig = require('./config.json');
-var clay = new Clay(clayConfig);   // autoHandleEvents: true — Clay persists & sends AppMessage
+var clay = new Clay(clayConfig);   // autoHandleEvents: true - Clay persists & sends AppMessage
 
 // Keys must match #define KEY_* in main.c exactly
 var KEY_AWAY_ABBR    = 1;
@@ -31,6 +31,8 @@ var KEY_SCORE_EVENT  = 23;
 var KEY_NETWORK      = 24;
 var KEY_FEATURED_TAG = 25;
 var KEY_TEAM_LOGOS   = 26;
+var KEY_AWAY_STATS   = 28;
+var KEY_HOME_STATS   = 29;
 
 var SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
 var SUMMARY_URL    = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary";
@@ -89,18 +91,18 @@ function loadFromClay() {
 }
 loadFromClay();
 
-// ── Scoring-play tracker (per gamePk) — mirrors the MLB HR tracker pattern.
+// ── Scoring-play tracker (per gamePk) - mirrors the MLB HR tracker pattern.
 // Only the FIRST call for a given gameId establishes the baseline (no buzz for
 // plays that happened before the watch started watching); every scoring play
 // found after that baseline is examined for TD / FG / Safety.
 var gLastGameId     = null;
 var gLastScoreCount = -1;
 
-// Returns 0 (no buzz), 1 (single short buzz — FG or Safety) or 2 (triple buzz — TD)
+// Returns 0 (no buzz), 1 (single short buzz - FG or Safety) or 2 (triple buzz - TD)
 // for the highest-priority NEW scoring play by `myAbbr` since the last check.
 // PATs and 2-point conversions are folded into the touchdown's own scoring-play
 // entry by ESPN's API (they never appear as their own entry), so they never
-// produce a separate event — exactly the behavior we want.
+// produce a separate event - exactly the behavior we want.
 function checkScoreEvent(summaryData, gameId, myAbbr) {
   var scoringPlays = (summaryData && summaryData.scoringPlays) || [];
 
@@ -119,7 +121,7 @@ function checkScoreEvent(summaryData, gameId, myAbbr) {
     var abbr = ((sp.type) || {}).abbreviation || "";
     var text = ((sp.type) || {}).text || "";
     if (abbr === "TD" || text.indexOf("Touchdown") !== -1) {
-      event = 2; // triple buzz — highest priority, stop looking for a bigger one
+      event = 2; // triple buzz - highest priority, stop looking for a bigger one
     } else if (event < 1 && (abbr === "FG" || abbr === "SF" ||
                text.indexOf("Field Goal") !== -1 || text.indexOf("Safety") !== -1)) {
       event = 1; // single buzz
@@ -127,6 +129,31 @@ function checkScoreEvent(summaryData, gameId, myAbbr) {
   }
   gLastScoreCount = scoringPlays.length;
   return event;
+}
+
+// Pulls each team's net passing yards + rushing yards out of the boxscore
+// (same summary fetch used for scoring plays, no extra request) and formats
+// them as a compact "P:123 R:45" string per team.
+function findTeamStat(statsArr, name) {
+  for (var i = 0; i < (statsArr || []).length; i++) {
+    if (statsArr[i].name === name) return statsArr[i].displayValue || "0";
+  }
+  return "0";
+}
+
+function extractTeamStats(summaryData, awayAbbr, homeAbbr) {
+  var result = { away: "", home: "" };
+  var teams = (summaryData && summaryData.boxscore && summaryData.boxscore.teams) || [];
+  for (var i = 0; i < teams.length; i++) {
+    var abbr = ((teams[i].team) || {}).abbreviation || "";
+    var stats = teams[i].statistics || [];
+    var pass = findTeamStat(stats, "netPassingYards");
+    var rush = findTeamStat(stats, "rushingYards");
+    var line = "P:" + pass + " R:" + rush;
+    if (abbr === awayAbbr) result.away = line;
+    else if (abbr === homeAbbr) result.home = line;
+  }
+  return result;
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────
@@ -242,7 +269,7 @@ function findPrimetimeEvent(events) {
     }
   }
 
-  // No recognized network match — fall back to the day's latest kickoff
+  // No recognized network match - fall back to the day's latest kickoff
   var latest = todays[0];
   for (var m = 1; m < todays.length; m++) {
     if (new Date(todays[m].competitions[0].date) > new Date(latest.competitions[0].date)) latest = todays[m];
@@ -274,7 +301,7 @@ function parsePossessionText(text) {
 
 // Map possession + yard-from-own-goal into a 0-100 field position where
 // 0 = away team's own goal line (left edge) and 100 = home team's own goal
-// line (right edge) — matches the field bar drawn on the watch.
+// line (right edge) - matches the field bar drawn on the watch.
 function computeFieldPos(situation, awayAbbr, homeAbbr) {
   var parsed = parsePossessionText(situation.possessionText || "");
   if (!parsed) return 50;
@@ -417,7 +444,7 @@ function stateOf(comp) {
 // (or `null` on a bye), but if Primetime Auto is on, your team isn't
 // currently live, and today's TNF/SNF/MNF game is live or kicking off soon,
 // feature that instead. The moment the primetime game goes final (or your
-// own game goes live), this naturally reverts on the next minute's fetch —
+// own game goes live), this naturally reverts on the next minute's fetch -
 // there is no separate "revert" step.
 function chooseFeaturedEvent(myEvent, events, abbr) {
   var myLive = myEvent && stateOf(myEvent.competitions[0]) === "live";
@@ -487,6 +514,8 @@ function processEvents(data, events, week, abbr) {
   msg[KEY_POSSESSION]   = 2; // none
   msg[KEY_LAST_PLAY]    = "";
   msg[KEY_SCORE_EVENT]  = 0;
+  msg[KEY_AWAY_STATS]   = "";
+  msg[KEY_HOME_STATS]   = "";
 
   var situation = comp.situation;
   if (situation) {
@@ -525,11 +554,16 @@ function processEvents(data, events, week, abbr) {
 }
 
 // Only ever check for a scoring buzz when the featured game is actually MY
-// team's game — watching someone else's primetime game should never vibrate.
+// team's game - watching someone else's primetime game should never vibrate.
+// Passing/rushing stats, on the other hand, apply to whichever game is on
+// screen, so they're fetched for any live game.
 function finishSend(status, ev, msg, isMyGame, myAbbr) {
-  if (status === "live" && isMyGame && ev.id) {
+  if (status === "live" && ev.id) {
     fetchSummary(ev.id, function(summaryData) {
-      msg[KEY_SCORE_EVENT] = checkScoreEvent(summaryData, ev.id, myAbbr);
+      if (isMyGame) msg[KEY_SCORE_EVENT] = checkScoreEvent(summaryData, ev.id, myAbbr);
+      var stats = extractTeamStats(summaryData, msg[KEY_AWAY_ABBR], msg[KEY_HOME_ABBR]);
+      msg[KEY_AWAY_STATS] = stats.away;
+      msg[KEY_HOME_STATS] = stats.home;
       sendMessage(msg);
     });
     return;
@@ -539,7 +573,7 @@ function finishSend(status, ev, msg, isMyGame, myAbbr) {
 
 // ── AppMessage transport ────────────────────────────────────────────────────
 // Split across two messages (main + ticker) to stay well under the 512-byte
-// inbox limit — same reasoning as the MLB watchface.
+// inbox limit - same reasoning as the MLB watchface.
 function sendMessage(dict) {
   var ticker = dict[KEY_TICKER];
   delete dict[KEY_TICKER];

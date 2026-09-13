@@ -6,7 +6,7 @@ Stuck in a meeting? Can't watch the game? Don't worry - keep the score on your w
 
 **Never miss the big game either** - when your team isn't playing, the watchface automatically switches to that night's Thursday/Sunday/Monday Night Football game (a small SNF/MNF/TNF badge marks when it isn't your team), then switches back on its own once that game ends or your team's does start. Toggle in Settings.
 
-**Live game** - team logos (Pebble Time 2 / Time), score, quarter & clock, down & distance, last play, TV network
+**Live game** - team logos (Pebble Time 2 / Time), score, quarter & clock, down & distance, last play, TV network, and each team's passing/rushing yards, which swap in for the down-and-distance/last-play lines once a minute so you get both without needing extra screen space
 
 **Field position bar** - a compact field graphic instead of a static diamond: end zones shaded in each team's real color and labeled with its abbreviation (Pebble Time 2), a football-shaped marker showing exactly where the ball is with a small arrow for which way it's headed, and a red outline that appears the instant either team enters the red zone and disappears the instant they leave it - no animation, just an at-a-glance state change
 

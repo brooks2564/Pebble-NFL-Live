@@ -56,7 +56,9 @@
       "NETWORK": 24,
       "FEATURED_TAG": 25,
       "TEAM_LOGOS": 26,
-      "TICKER_SPEED": 27
+      "TICKER_SPEED": 27,
+      "AWAY_STATS": 28,
+      "HOME_STATS": 29
     },
     "resources": {
       "media": [
