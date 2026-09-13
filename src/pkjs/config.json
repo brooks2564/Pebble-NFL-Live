@@ -1,0 +1,84 @@
+[
+  {
+    "type": "heading",
+    "defaultValue": "NFL Live"
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Favorite Team",
+        "size": 4
+      },
+      {
+        "type": "select",
+        "messageKey": "TEAM_IDX",
+        "label": "Team",
+        "defaultValue": 15,
+        "options": [
+          { "label": "ARI - Cardinals",   "value": 0  },
+          { "label": "ATL - Falcons",     "value": 1  },
+          { "label": "BAL - Ravens",      "value": 2  },
+          { "label": "BUF - Bills",       "value": 3  },
+          { "label": "CAR - Panthers",    "value": 4  },
+          { "label": "CHI - Bears",       "value": 5  },
+          { "label": "CIN - Bengals",     "value": 6  },
+          { "label": "CLE - Browns",      "value": 7  },
+          { "label": "DAL - Cowboys",     "value": 8  },
+          { "label": "DEN - Broncos",     "value": 9  },
+          { "label": "DET - Lions",       "value": 10 },
+          { "label": "GB - Packers",      "value": 11 },
+          { "label": "HOU - Texans",      "value": 12 },
+          { "label": "IND - Colts",       "value": 13 },
+          { "label": "JAX - Jaguars",     "value": 14 },
+          { "label": "KC - Chiefs",       "value": 15 },
+          { "label": "LV - Raiders",      "value": 16 },
+          { "label": "LAC - Chargers",    "value": 17 },
+          { "label": "LAR - Rams",        "value": 18 },
+          { "label": "MIA - Dolphins",    "value": 19 },
+          { "label": "MIN - Vikings",     "value": 20 },
+          { "label": "NE - Patriots",     "value": 21 },
+          { "label": "NO - Saints",       "value": 22 },
+          { "label": "NYG - Giants",      "value": 23 },
+          { "label": "NYJ - Jets",        "value": 24 },
+          { "label": "PHI - Eagles",      "value": 25 },
+          { "label": "PIT - Steelers",    "value": 26 },
+          { "label": "SF - 49ers",        "value": 27 },
+          { "label": "SEA - Seahawks",    "value": 28 },
+          { "label": "TB - Buccaneers",   "value": 29 },
+          { "label": "TEN - Titans",      "value": 30 },
+          { "label": "WSH - Commanders",  "value": 31 }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Notifications",
+        "size": 4
+      },
+      {
+        "type": "toggle",
+        "messageKey": "VIBRATE",
+        "label": "Vibrate on Score",
+        "description": "1 short buzz for a field goal or safety, 3 short buzzes for a touchdown. No buzz for PATs or 2-point tries.",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "BATTERY_BAR",
+        "label": "Battery Bar",
+        "description": "Show battery level at bottom of screen",
+        "defaultValue": true
+      }
+    ]
+  },
+  {
+    "type": "submit",
+    "defaultValue": "Save Settings"
+  }
+]

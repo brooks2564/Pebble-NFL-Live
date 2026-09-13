@@ -1,0 +1,62 @@
+{
+  "name": "nfl-live-scores",
+  "author": "Brooman Inks",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {
+    "pebble-clay": "github:brooks2564/pebble-clay-flint"
+  },
+  "pebble": {
+    "displayName": "NFL Live",
+    "shortName": "NFL Live",
+    "longName": "NFL Live Scores",
+    "uuid": "b13118dd-472d-4ce5-a65b-5c8515fcb02d",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "diorite",
+      "emery",
+      "flint"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "capabilities": [
+      "configurable"
+    ],
+    "messageKeys": {
+      "AWAY_ABBR": 1,
+      "HOME_ABBR": 2,
+      "AWAY_SCORE": 3,
+      "HOME_SCORE": 4,
+      "QUARTER": 5,
+      "CLOCK": 6,
+      "DOWN": 7,
+      "DISTANCE": 8,
+      "FIELD_POS": 9,
+      "REDZONE": 10,
+      "POSSESSION": 11,
+      "STATUS": 12,
+      "TEAM_IDX": 13,
+      "START_TIME": 14,
+      "AWAY_RECORD": 15,
+      "HOME_RECORD": 16,
+      "VIBRATE": 17,
+      "LAST_PLAY": 18,
+      "NEXT_GAME": 19,
+      "BATTERY_BAR": 20,
+      "TICKER": 21,
+      "DOWN_TEXT": 22,
+      "SCORE_EVENT": 23,
+      "NETWORK": 24
+    },
+    "resources": {
+      "media": []
+    }
+  }
+}

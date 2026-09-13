@@ -1,0 +1,532 @@
+#include <pebble.h>
+
+// ── Message keys — must match src/pkjs/index.js exactly ────────────────────
+#define KEY_AWAY_ABBR    1
+#define KEY_HOME_ABBR    2
+#define KEY_AWAY_SCORE   3
+#define KEY_HOME_SCORE   4
+#define KEY_QUARTER      5
+#define KEY_CLOCK        6
+#define KEY_DOWN         7
+#define KEY_DISTANCE     8
+#define KEY_FIELD_POS    9
+#define KEY_REDZONE      10
+#define KEY_POSSESSION   11
+#define KEY_STATUS       12
+#define KEY_TEAM_IDX     13
+#define KEY_START_TIME   14
+#define KEY_AWAY_RECORD  15
+#define KEY_HOME_RECORD  16
+#define KEY_VIBRATE      17
+#define KEY_LAST_PLAY    18
+#define KEY_NEXT_GAME    19
+#define KEY_BATTERY_BAR  20
+#define KEY_TICKER       21
+#define KEY_DOWN_TEXT    22
+#define KEY_SCORE_EVENT  23
+#define KEY_NETWORK      24
+
+#define PERSIST_TEAM  1
+#define PERSIST_VIB   2
+#define PERSIST_BAT   3
+
+#define MAX_GAMES 6
+#define GAME_LEN  26
+#define TICKER_INTERVAL_MS 6000
+
+static Window *s_window;
+static Layer  *s_canvas;
+static AppTimer *s_ticker_timer;
+
+// Ticker state — parsed from the pipe-delimited TICKER string
+static char s_ticker_raw[200];
+static char s_games[MAX_GAMES][GAME_LEN];
+static int  s_game_count;
+static int  s_game_idx;
+
+// Game state
+static char s_time_buf[6]   = "00:00";
+static char s_date_buf[14]  = "";
+static int  s_team_idx      = 15; // KC
+static char s_away_abbr[5]  = "---";
+static char s_home_abbr[5]  = "---";
+static int  s_away_score    = 0;
+static int  s_home_score    = 0;
+static int  s_quarter       = 0;
+static char s_clock[8]      = "";
+static int  s_down          = 0;
+static int  s_distance      = 0;
+static char s_down_text[24] = "";
+static int  s_field_pos     = 50;   // 0 = away goal line, 100 = home goal line
+static bool s_redzone       = false;
+static int  s_possession    = 2;    // 0=away, 1=home, 2=none
+static char s_status[8]     = "off";
+static char s_start_time[10]= "";
+static char s_away_record[10] = "";
+static char s_home_record[10] = "";
+static bool s_vibrate       = true;
+static char s_last_play[44] = "";
+static char s_next_game[24] = "";
+static bool s_battery_bar   = true;
+static int  s_battery_pct   = 100;
+static char s_network[24]   = "";
+
+static void request_game_data(void);
+
+// ── Ticker parsing (pipe-delimited "AWAY 10 - HOME 7 Q2 8:42" entries) ──────
+static void ticker_parse(void) {
+  s_game_count = 0;
+  s_game_idx   = 0;
+  int len = strlen(s_ticker_raw);
+  int start = 0;
+  for (int i = 0; i <= len && s_game_count < MAX_GAMES; i++) {
+    if (s_ticker_raw[i] == '|' || s_ticker_raw[i] == '\0') {
+      int seg_len = i - start;
+      if (seg_len > 0) {
+        if (seg_len >= GAME_LEN) seg_len = GAME_LEN - 1;
+        memcpy(s_games[s_game_count], s_ticker_raw + start, seg_len);
+        s_games[s_game_count][seg_len] = '\0';
+        s_game_count++;
+      }
+      start = i + 1;
+    }
+  }
+}
+
+static void ticker_advance(void *ctx) {
+  if (s_game_count > 0) {
+    s_game_idx = (s_game_idx + 1) % s_game_count;
+    if (s_canvas) layer_mark_dirty(s_canvas);
+  }
+  s_ticker_timer = app_timer_register(TICKER_INTERVAL_MS, ticker_advance, NULL);
+}
+
+// ── Team colors (emery only — see MLB blueprint precedent) ─────────────────
+#ifdef PBL_PLATFORM_EMERY
+static GColor team_color(const char *abbr) {
+  if (!abbr) return GColorWhite;
+  if (strcmp(abbr,"ARI")==0) return GColorFromHEX(0xa40227);
+  if (strcmp(abbr,"ATL")==0) return GColorFromHEX(0xa71930);
+  if (strcmp(abbr,"BAL")==0) return GColorFromHEX(0x29126f);
+  if (strcmp(abbr,"BUF")==0) return GColorFromHEX(0x00338d);
+  if (strcmp(abbr,"CAR")==0) return GColorFromHEX(0x0085ca);
+  if (strcmp(abbr,"CHI")==0) return GColorFromHEX(0x0b1c3a);
+  if (strcmp(abbr,"CIN")==0) return GColorFromHEX(0xfb4f14);
+  if (strcmp(abbr,"CLE")==0) return GColorFromHEX(0x8a3324);
+  if (strcmp(abbr,"DAL")==0) return GColorFromHEX(0x002a5c);
+  if (strcmp(abbr,"DEN")==0) return GColorFromHEX(0xfc4c02);
+  if (strcmp(abbr,"DET")==0) return GColorFromHEX(0x0076b6);
+  if (strcmp(abbr,"GB") ==0) return GColorFromHEX(0x204e32);
+  if (strcmp(abbr,"HOU")==0) return GColorFromHEX(0xeb0028);
+  if (strcmp(abbr,"IND")==0) return GColorFromHEX(0x003b75);
+  if (strcmp(abbr,"JAX")==0) return GColorFromHEX(0x007487);
+  if (strcmp(abbr,"KC") ==0) return GColorFromHEX(0xe31837);
+  if (strcmp(abbr,"LV") ==0) return GColorFromHEX(0xa5acaf);
+  if (strcmp(abbr,"LAC")==0) return GColorFromHEX(0x0080c6);
+  if (strcmp(abbr,"LAR")==0) return GColorFromHEX(0x003594);
+  if (strcmp(abbr,"MIA")==0) return GColorFromHEX(0x008e97);
+  if (strcmp(abbr,"MIN")==0) return GColorFromHEX(0x4f2683);
+  if (strcmp(abbr,"NE") ==0) return GColorFromHEX(0xc60c30);
+  if (strcmp(abbr,"NO") ==0) return GColorFromHEX(0xd3bc8d);
+  if (strcmp(abbr,"NYG")==0) return GColorFromHEX(0x003c7f);
+  if (strcmp(abbr,"NYJ")==0) return GColorFromHEX(0x115740);
+  if (strcmp(abbr,"PHI")==0) return GColorFromHEX(0x06424d);
+  if (strcmp(abbr,"PIT")==0) return GColorFromHEX(0xffb612);
+  if (strcmp(abbr,"SF") ==0) return GColorFromHEX(0xaa0000);
+  if (strcmp(abbr,"SEA")==0) return GColorFromHEX(0x69be28);
+  if (strcmp(abbr,"TB") ==0) return GColorFromHEX(0xbd1c36);
+  if (strcmp(abbr,"TEN")==0) return GColorFromHEX(0x4495d2);
+  if (strcmp(abbr,"WSH")==0) return GColorFromHEX(0x5a1414);
+  return GColorWhite;
+}
+
+static void draw_team_text(GContext *ctx, const char *text, GFont font, GRect rect,
+                            GTextOverflowMode overflow, GTextAlignment align, GColor color) {
+  graphics_context_set_text_color(ctx, GColorBlack);
+  GRect r = rect;
+  r.origin.x -= 1; graphics_draw_text(ctx, text, font, r, overflow, align, NULL);
+  r.origin.x += 2; graphics_draw_text(ctx, text, font, r, overflow, align, NULL);
+  r.origin.x -= 1; r.origin.y -= 1; graphics_draw_text(ctx, text, font, r, overflow, align, NULL);
+  r.origin.y += 2; graphics_draw_text(ctx, text, font, r, overflow, align, NULL);
+  graphics_context_set_text_color(ctx, color);
+  graphics_draw_text(ctx, text, font, rect, overflow, align, NULL);
+}
+#endif
+
+// ── Field position bar ──────────────────────────────────────────────────────
+// 0 = away team's own goal line (left edge), 100 = home team's own goal line
+// (right edge). End zones are shaded in each team's color on emery (generic
+// dark shading elsewhere). A red outline appears for as long as REDZONE is
+// true and disappears the instant it clears — no animation, no timer.
+static void draw_field_bar(GContext *ctx, int x, int y, int w, int h) {
+#ifdef PBL_PLATFORM_EMERY
+  int ez_w = w * 13 / 100; // ~13% end zone width each side, visually generous
+#else
+  int ez_w = w * 12 / 100;
+#endif
+  GRect bar = GRect(x, y, w, h);
+
+  // Field (middle) background
+  graphics_context_set_fill_color(ctx, GColorDarkGray);
+  graphics_fill_rect(ctx, bar, 0, GCornerNone);
+
+  // End zones
+#ifdef PBL_PLATFORM_EMERY
+  graphics_context_set_fill_color(ctx, team_color(s_away_abbr));
+  graphics_fill_rect(ctx, GRect(x, y, ez_w, h), 0, GCornerNone);
+  graphics_context_set_fill_color(ctx, team_color(s_home_abbr));
+  graphics_fill_rect(ctx, GRect(x + w - ez_w, y, ez_w, h), 0, GCornerNone);
+#else
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, GRect(x, y, ez_w, h), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(x + w - ez_w, y, ez_w, h), 0, GCornerNone);
+#endif
+
+  // Separator lines between end zone and field
+  graphics_context_set_stroke_color(ctx, GColorWhite);
+  graphics_draw_line(ctx, GPoint(x + ez_w, y), GPoint(x + ez_w, y + h));
+  graphics_draw_line(ctx, GPoint(x + w - ez_w, y), GPoint(x + w - ez_w, y + h));
+
+  // 10-yard tick marks across the field
+  int field_w = w - 2 * ez_w;
+  for (int i = 1; i < 10; i++) {
+    int tx = x + ez_w + (field_w * i) / 10;
+    graphics_draw_line(ctx, GPoint(tx, y + h - 4), GPoint(tx, y + h));
+  }
+
+  // Ball marker
+  if (strcmp(s_status, "live") == 0) {
+    int bx = x + ez_w + (field_w * s_field_pos) / 100;
+    GColor mark_color = GColorWhite;
+#ifdef PBL_PLATFORM_EMERY
+    if (s_possession == 0) mark_color = team_color(s_away_abbr);
+    else if (s_possession == 1) mark_color = team_color(s_home_abbr);
+#endif
+    graphics_context_set_fill_color(ctx, mark_color);
+    graphics_fill_circle(ctx, GPoint(bx, y + h / 2), h / 2 - 1);
+    graphics_context_set_stroke_color(ctx, GColorWhite);
+    graphics_draw_circle(ctx, GPoint(bx, y + h / 2), h / 2 - 1);
+  }
+
+  // Red zone outline — on while REDZONE is true, off the moment it clears
+#ifdef PBL_COLOR
+  GColor rz_color = GColorRed;
+#else
+  GColor rz_color = GColorWhite;
+#endif
+  GColor outline = s_redzone ? rz_color : GColorLightGray;
+  graphics_context_set_stroke_color(ctx, outline);
+  GRect outline_rect = bar;
+  graphics_draw_rect(ctx, outline_rect);
+  if (s_redzone) {
+    // second pass, 1px in, so the outline reads as a clear 2px ring
+    GRect inner = GRect(x + 1, y + 1, w - 2, h - 2);
+    graphics_draw_rect(ctx, inner);
+  }
+}
+
+// ── Canvas ───────────────────────────────────────────────────────────────
+static void canvas_update(Layer *layer, GContext *ctx) {
+  GRect b = layer_get_bounds(layer);
+  int w = b.size.w;
+  int h = b.size.h;
+  int split = h * 3 / 10;
+  int by = split + 2;
+#ifdef PBL_ROUND
+  int hpad = 18;
+#else
+  int hpad = 2;
+#endif
+
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, b, 0, GCornerNone);
+
+  if (s_battery_bar) {
+    int bw = (w * s_battery_pct) / 100;
+    graphics_context_set_fill_color(ctx, GColorDarkGray);
+    graphics_fill_rect(ctx, GRect(0, h - 3, w, 3), 0, GCornerNone);
+    GColor bc = s_battery_pct > 50 ? GColorGreen :
+                s_battery_pct > 20 ? GColorYellow : GColorRed;
+    graphics_context_set_fill_color(ctx, bc);
+    graphics_fill_rect(ctx, GRect(0, h - 3, bw, 3), 0, GCornerNone);
+  }
+
+  graphics_context_set_stroke_color(ctx, GColorDarkGray);
+  graphics_draw_line(ctx, GPoint(0, split), GPoint(w, split));
+
+  bool live_now  = strcmp(s_status, "live")  == 0;
+  bool final_now = strcmp(s_status, "final") == 0;
+  bool pre_now   = strcmp(s_status, "pre")   == 0;
+  bool off_now   = strcmp(s_status, "off")   == 0;
+
+#ifdef PBL_PLATFORM_EMERY
+  GFont f_score = fonts_get_system_font(FONT_KEY_BITHAM_30_BLACK);
+  GFont f_abbr  = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  GFont f_mid   = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GFont f_small = fonts_get_system_font(FONT_KEY_GOTHIC_18);
+  GFont f_tiny  = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  int score_w = 110, abbr_w = 44, score_h = 32;
+  int score_y = by - 8, rec_y = by + 16;
+  int status_y = by + 36, detail_y = by + 58, lp_y = by + 78;
+  int fb_y = by + 100, fb_h = 24;
+  int ticker_y = fb_y + fb_h + 8, ticker_h = 16;
+#else
+  GFont f_score = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  GFont f_abbr  = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GFont f_mid   = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont f_small = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  GFont f_tiny  = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  int score_w = 68, abbr_w = 36, score_h = 26;
+  int score_y = by - 4, rec_y = by + 20;
+  int status_y = by + 34, detail_y = by + 48, lp_y = by + 62;
+  int fb_y = by + 78, fb_h = 14;
+  int ticker_y = fb_y + fb_h + 4, ticker_h = 12;
+#endif
+
+  // Time + date
+  graphics_context_set_text_color(ctx, GColorWhite);
+#ifdef PBL_PLATFORM_EMERY
+  graphics_draw_text(ctx, s_time_buf, f_mid, GRect(hpad, 2, 72, 30),
+    GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
+  graphics_context_set_text_color(ctx, GColorLightGray);
+  graphics_draw_text(ctx, s_date_buf, fonts_get_system_font(FONT_KEY_GOTHIC_24),
+    GRect(68, 2, w - 68 - hpad, 26), GTextOverflowModeWordWrap, GTextAlignmentRight, NULL);
+#else
+  graphics_draw_text(ctx, s_time_buf, f_mid, GRect(hpad, 2, 60, 24),
+    GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
+  graphics_context_set_text_color(ctx, GColorLightGray);
+  graphics_draw_text(ctx, s_date_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18),
+    GRect(56, 2, w - 56 - hpad, 20), GTextOverflowModeWordWrap, GTextAlignmentRight, NULL);
+#endif
+
+  // Away / Home abbreviations + score
+#ifdef PBL_PLATFORM_EMERY
+  draw_team_text(ctx, s_away_abbr, f_abbr, GRect(hpad, score_y, abbr_w, score_h),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, team_color(s_away_abbr));
+  draw_team_text(ctx, s_home_abbr, f_abbr, GRect(w - abbr_w - hpad, score_y, abbr_w, score_h),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, team_color(s_home_abbr));
+#else
+  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_draw_text(ctx, s_away_abbr, f_abbr, GRect(hpad, score_y, abbr_w, score_h),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  graphics_draw_text(ctx, s_home_abbr, f_abbr, GRect(w - abbr_w - hpad, score_y, abbr_w, score_h),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+#endif
+
+  if (!off_now) {
+    char sbuf[16];
+    graphics_context_set_text_color(ctx, GColorWhite);
+    snprintf(sbuf, sizeof(sbuf), "%d - %d", s_away_score, s_home_score);
+    graphics_draw_text(ctx, sbuf, f_score, GRect(hpad + abbr_w, score_y, score_w, score_h),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Records
+  if (pre_now || final_now) {
+    graphics_context_set_text_color(ctx, GColorLightGray);
+    graphics_draw_text(ctx, s_away_record, f_tiny, GRect(hpad, rec_y, abbr_w + 20, 16),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, s_home_record, f_tiny, GRect(w - abbr_w - hpad - 20, rec_y, abbr_w + 20, 16),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+  }
+
+  // Status row: quarter + clock (live), kickoff time (pre), FINAL (final), bye (off)
+  graphics_context_set_text_color(ctx, GColorWhite);
+  char status_buf[24] = "";
+  if (live_now) {
+    if (s_quarter > 0) snprintf(status_buf, sizeof(status_buf), "Q%d  %s", s_quarter, s_clock);
+    else snprintf(status_buf, sizeof(status_buf), "%s", s_clock);
+  } else if (pre_now) {
+    snprintf(status_buf, sizeof(status_buf), "Kickoff %s", s_start_time);
+  } else if (final_now) {
+    snprintf(status_buf, sizeof(status_buf), "FINAL");
+  } else {
+    snprintf(status_buf, sizeof(status_buf), "%s", s_next_game[0] ? s_next_game : "No Game");
+  }
+  graphics_draw_text(ctx, status_buf, f_mid, GRect(hpad, status_y, w - 2 * hpad, 26),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+  // Detail row: down & distance (live), network (pre), next game (final)
+  graphics_context_set_text_color(ctx, GColorLightGray);
+  char detail_buf[32] = "";
+  if (live_now && s_down_text[0]) {
+    snprintf(detail_buf, sizeof(detail_buf), "%s", s_down_text);
+  } else if (pre_now && s_network[0]) {
+    snprintf(detail_buf, sizeof(detail_buf), "%s", s_network);
+  } else if (final_now && s_next_game[0]) {
+    snprintf(detail_buf, sizeof(detail_buf), "%s", s_next_game);
+  }
+  if (detail_buf[0]) {
+    graphics_draw_text(ctx, detail_buf, f_small, GRect(hpad, detail_y, w - 2 * hpad, 20),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Last play
+  if (live_now && s_last_play[0]) {
+    graphics_context_set_text_color(ctx, GColorLightGray);
+    graphics_draw_text(ctx, s_last_play, f_tiny, GRect(hpad, lp_y, w - 2 * hpad, 18),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Field position bar
+  draw_field_bar(ctx, hpad, fb_y, w - 2 * hpad, fb_h);
+
+  // Ticker — other games this week, cycling every few seconds
+  graphics_context_set_text_color(ctx, GColorLightGray);
+  const char *ticker_text = (s_game_count > 0) ? s_games[s_game_idx] : "";
+  graphics_draw_text(ctx, ticker_text, f_tiny, GRect(hpad, ticker_y, w - 2 * hpad, ticker_h + 4),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+}
+
+// ── Clock ────────────────────────────────────────────────────────────────
+static void update_clock(struct tm *t) {
+  clock_copy_time_string(s_time_buf, sizeof(s_time_buf));
+  strftime(s_date_buf, sizeof(s_date_buf), "%a  %b %d", t);
+}
+
+static void tick_handler(struct tm *t, TimeUnits units) {
+  update_clock(t);
+  if (units & MINUTE_UNIT) request_game_data();
+  if (s_canvas) layer_mark_dirty(s_canvas);
+}
+
+// ── Vibration ────────────────────────────────────────────────────────────
+// 1 short buzz for a field goal or safety, 3 short buzzes for a touchdown.
+// No buzz at all for PATs / two-point tries (they never produce a distinct
+// score_event — see checkScoreEvent() in index.js).
+static void fire_score_vibe(int score_event) {
+  if (!s_vibrate || score_event <= 0) return;
+  if (score_event == 2) {
+    static const uint32_t segments[] = {80, 120, 80, 120, 80};
+    VibePattern pat = {
+      .durations = segments,
+      .num_segments = ARRAY_LENGTH(segments),
+    };
+    vibes_enqueue_custom_pattern(pat);
+  } else {
+    vibes_short_pulse();
+  }
+}
+
+// ── Inbox ──────────────────────────────────────────────────────────────────
+static void inbox_received(DictionaryIterator *iter, void *ctx) {
+  Tuple *t;
+
+  t = dict_find(iter, KEY_AWAY_ABBR);
+  if (t) { strncpy(s_away_abbr, t->value->cstring, 4); s_away_abbr[4] = 0; }
+  t = dict_find(iter, KEY_HOME_ABBR);
+  if (t) { strncpy(s_home_abbr, t->value->cstring, 4); s_home_abbr[4] = 0; }
+  t = dict_find(iter, KEY_AWAY_SCORE);  if (t) s_away_score = (int)t->value->int32;
+  t = dict_find(iter, KEY_HOME_SCORE);  if (t) s_home_score = (int)t->value->int32;
+  t = dict_find(iter, KEY_QUARTER);     if (t) s_quarter    = (int)t->value->int32;
+  t = dict_find(iter, KEY_CLOCK);
+  if (t) { strncpy(s_clock, t->value->cstring, 7); s_clock[7] = 0; }
+  t = dict_find(iter, KEY_DOWN);        if (t) s_down     = (int)t->value->int32;
+  t = dict_find(iter, KEY_DISTANCE);    if (t) s_distance = (int)t->value->int32;
+  t = dict_find(iter, KEY_DOWN_TEXT);
+  if (t) { strncpy(s_down_text, t->value->cstring, 23); s_down_text[23] = 0; }
+  t = dict_find(iter, KEY_FIELD_POS);   if (t) s_field_pos  = (int)t->value->int32;
+  t = dict_find(iter, KEY_REDZONE);     if (t) s_redzone    = (bool)t->value->int32;
+  t = dict_find(iter, KEY_POSSESSION);  if (t) s_possession = (int)t->value->int32;
+  t = dict_find(iter, KEY_STATUS);
+  if (t) { strncpy(s_status, t->value->cstring, 7); s_status[7] = 0; }
+  t = dict_find(iter, KEY_START_TIME);
+  if (t) { strncpy(s_start_time, t->value->cstring, 9); s_start_time[9] = 0; }
+  t = dict_find(iter, KEY_AWAY_RECORD);
+  if (t) { strncpy(s_away_record, t->value->cstring, 9); s_away_record[9] = 0; }
+  t = dict_find(iter, KEY_HOME_RECORD);
+  if (t) { strncpy(s_home_record, t->value->cstring, 9); s_home_record[9] = 0; }
+  t = dict_find(iter, KEY_VIBRATE);
+  if (t) { s_vibrate = (bool)t->value->int32; persist_write_bool(PERSIST_VIB, s_vibrate); }
+  t = dict_find(iter, KEY_LAST_PLAY);
+  if (t) { strncpy(s_last_play, t->value->cstring, 43); s_last_play[43] = 0; }
+  t = dict_find(iter, KEY_NEXT_GAME);
+  if (t) { strncpy(s_next_game, t->value->cstring, 23); s_next_game[23] = 0; }
+  t = dict_find(iter, KEY_BATTERY_BAR);
+  if (t) { s_battery_bar = (bool)t->value->int32; persist_write_bool(PERSIST_BAT, s_battery_bar); }
+  t = dict_find(iter, KEY_NETWORK);
+  if (t) { strncpy(s_network, t->value->cstring, 23); s_network[23] = 0; }
+  t = dict_find(iter, KEY_TICKER);
+  if (t) {
+    strncpy(s_ticker_raw, t->value->cstring, sizeof(s_ticker_raw) - 1);
+    s_ticker_raw[sizeof(s_ticker_raw) - 1] = 0;
+    ticker_parse();
+  }
+  t = dict_find(iter, KEY_TEAM_IDX);
+  if (t) { s_team_idx = (int)t->value->int32; persist_write_int(PERSIST_TEAM, s_team_idx); }
+
+  int score_event = 0;
+  t = dict_find(iter, KEY_SCORE_EVENT);
+  if (t) score_event = (int)t->value->int32;
+  fire_score_vibe(score_event);
+
+  if (s_canvas) layer_mark_dirty(s_canvas);
+}
+
+static void inbox_dropped(AppMessageResult reason, void *ctx) {
+  APP_LOG(APP_LOG_LEVEL_ERROR, "Inbox dropped: %d", (int)reason);
+}
+
+static void request_game_data(void) {
+  DictionaryIterator *iter;
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) return;
+  dict_write_int(iter, KEY_TEAM_IDX, &s_team_idx, sizeof(int), true);
+  app_message_outbox_send();
+}
+
+static void battery_handler(BatteryChargeState state) {
+  s_battery_pct = state.charge_percent;
+  if (s_canvas) layer_mark_dirty(s_canvas);
+}
+
+// ── Window ───────────────────────────────────────────────────────────────
+static void window_load(Window *window) {
+  Layer *root = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(root);
+
+  s_canvas = layer_create(bounds);
+  layer_set_update_proc(s_canvas, canvas_update);
+  layer_add_child(root, s_canvas);
+}
+
+static void window_unload(Window *window) {
+  if (s_ticker_timer) { app_timer_cancel(s_ticker_timer); s_ticker_timer = NULL; }
+  if (s_canvas) { layer_destroy(s_canvas); s_canvas = NULL; }
+}
+
+static void init(void) {
+  memset(s_ticker_raw, 0, sizeof(s_ticker_raw));
+
+  if (persist_exists(PERSIST_TEAM)) s_team_idx    = persist_read_int(PERSIST_TEAM);
+  if (persist_exists(PERSIST_VIB))  s_vibrate     = persist_read_bool(PERSIST_VIB);
+  if (persist_exists(PERSIST_BAT))  s_battery_bar = persist_read_bool(PERSIST_BAT);
+
+  time_t now = time(NULL);
+  update_clock(localtime(&now));
+
+  s_window = window_create();
+  window_set_background_color(s_window, GColorBlack);
+  window_set_window_handlers(s_window, (WindowHandlers){
+    .load = window_load, .unload = window_unload });
+  window_stack_push(s_window, true);
+
+  tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
+  battery_state_service_subscribe(battery_handler);
+  s_battery_pct = battery_state_service_peek().charge_percent;
+
+  app_message_register_inbox_received(inbox_received);
+  app_message_register_inbox_dropped(inbox_dropped);
+  app_message_open(512, 64);
+
+  s_ticker_timer = app_timer_register(TICKER_INTERVAL_MS, ticker_advance, NULL);
+  // Delay initial fetch so Clay's ready-event config send isn't competing with game data
+  app_timer_register(2000, (AppTimerCallback)request_game_data, NULL);
+}
+
+static void deinit(void) {
+  tick_timer_service_unsubscribe();
+  battery_state_service_unsubscribe();
+  window_destroy(s_window);
+}
+
+int main(void) { init(); app_event_loop(); deinit(); return 0; }
