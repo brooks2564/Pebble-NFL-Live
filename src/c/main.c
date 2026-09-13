@@ -71,7 +71,7 @@ static char s_away_record[10] = "";
 static char s_home_record[10] = "";
 static bool s_vibrate       = true;
 static char s_last_play[44] = "";
-static char s_next_game[24] = "";
+static char s_next_game[32] = "";
 static bool s_battery_bar   = true;
 static int  s_battery_pct   = 100;
 static char s_network[24]   = "";
@@ -87,6 +87,15 @@ static char s_home_logo_abbr[5] = "";
 #else
 static GBitmap *s_away_logo_lg = NULL, *s_away_logo_sm = NULL;
 static GBitmap *s_home_logo_lg = NULL, *s_home_logo_sm = NULL;
+#endif
+
+// Single shared football icon used as the field-bar ball marker (loaded once,
+// not per-team)
+static GBitmap *s_football_bmp = NULL;
+#ifdef PBL_PLATFORM_EMERY
+  #define FOOTBALL_RESOURCE RESOURCE_ID_FOOTBALL_EM
+#else
+  #define FOOTBALL_RESOURCE RESOURCE_ID_FOOTBALL_BA
 #endif
 
 static void request_game_data(void);
@@ -263,12 +272,27 @@ static void draw_team_badge(GContext *ctx, const char *abbr, GFont font, GRect r
 #endif
 }
 
+// White-on-black-outline halo text — legible over any background color,
+// which is exactly what the endzone abbreviations need since they sit on
+// top of each team's own (highly variable) color.
+static void draw_halo_text(GContext *ctx, const char *text, GFont font, GRect rect) {
+  graphics_context_set_text_color(ctx, GColorBlack);
+  GRect r = rect;
+  r.origin.x -= 1; graphics_draw_text(ctx, text, font, r, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  r.origin.x += 2; graphics_draw_text(ctx, text, font, r, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  r.origin.x -= 1; r.origin.y -= 1; graphics_draw_text(ctx, text, font, r, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  r.origin.y += 2; graphics_draw_text(ctx, text, font, r, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_draw_text(ctx, text, font, rect, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+}
+
 // ── Field position bar ──────────────────────────────────────────────────────
 // 0 = away team's own goal line (left edge), 100 = home team's own goal line
 // (right edge). End zones are shaded in each team's color on emery (generic
-// dark shading elsewhere). A red outline appears for as long as REDZONE is
-// true and disappears the instant it clears — no animation, no timer.
-static void draw_field_bar(GContext *ctx, int x, int y, int w, int h) {
+// dark shading elsewhere), each labeled with its 3-letter abbreviation. A red
+// outline appears for as long as REDZONE is true and disappears the instant
+// it clears — no animation, no timer.
+static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez) {
 #ifdef PBL_PLATFORM_EMERY
   int ez_w = w * 13 / 100; // ~13% end zone width each side, visually generous
 #else
@@ -292,6 +316,10 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h) {
   graphics_fill_rect(ctx, GRect(x + w - ez_w, y, ez_w, h), 0, GCornerNone);
 #endif
 
+  // Endzone abbreviations — white-on-black halo reads over any team color
+  draw_halo_text(ctx, s_away_abbr, f_ez, GRect(x, y, ez_w, h));
+  draw_halo_text(ctx, s_home_abbr, f_ez, GRect(x + w - ez_w, y, ez_w, h));
+
   // Separator lines between end zone and field
   graphics_context_set_stroke_color(ctx, GColorWhite);
   graphics_draw_line(ctx, GPoint(x + ez_w, y), GPoint(x + ez_w, y + h));
@@ -304,18 +332,23 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h) {
     graphics_draw_line(ctx, GPoint(tx, y + h - 4), GPoint(tx, y + h));
   }
 
-  // Ball marker
-  if (strcmp(s_status, "live") == 0) {
+  // Ball marker (football icon) + a small arrow showing which way the
+  // offense is driving
+  if (strcmp(s_status, "live") == 0 && s_football_bmp) {
     int bx = x + ez_w + (field_w * s_field_pos) / 100;
-    GColor mark_color = GColorWhite;
-#ifdef PBL_PLATFORM_EMERY
-    if (s_possession == 0) mark_color = team_color(s_away_abbr);
-    else if (s_possession == 1) mark_color = team_color(s_home_abbr);
-#endif
-    graphics_context_set_fill_color(ctx, mark_color);
-    graphics_fill_circle(ctx, GPoint(bx, y + h / 2), h / 2 - 1);
-    graphics_context_set_stroke_color(ctx, GColorWhite);
-    graphics_draw_circle(ctx, GPoint(bx, y + h / 2), h / 2 - 1);
+    GRect fb = gbitmap_get_bounds(s_football_bmp);
+    GRect dest = GRect(bx - fb.size.w / 2, y + (h - fb.size.h) / 2, fb.size.w, fb.size.h);
+    graphics_context_set_compositing_mode(ctx, GCompOpSet);
+    graphics_draw_bitmap_in_rect(ctx, s_football_bmp, dest);
+    graphics_context_set_compositing_mode(ctx, GCompOpAssign);
+
+    if (s_possession == 0 || s_possession == 1) {
+      const char *arrow = (s_possession == 0) ? ">" : "<";
+      int arrow_x = (s_possession == 0) ? dest.origin.x + fb.size.w + 1 : dest.origin.x - 9;
+      graphics_context_set_text_color(ctx, GColorWhite);
+      graphics_draw_text(ctx, arrow, f_ez, GRect(arrow_x, y - 1, 10, h),
+        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    }
   }
 
   // Red zone outline — on while REDZONE is true, off the moment it clears
@@ -449,8 +482,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   // A featured-primetime game (see Auto-Show Primetime Games) prefixes an
   // "SNF"/"MNF"/"TNF" tag so it's never mistaken for your own team's game.
   graphics_context_set_text_color(ctx, GColorWhite);
-  char status_buf[32] = "";
-  char status_core[24] = "";
+  char status_buf[40] = "";
+  char status_core[32] = "";
   if (live_now) {
     if (s_quarter > 0) snprintf(status_core, sizeof(status_core), "Q%d  %s", s_quarter, s_clock);
     else snprintf(status_core, sizeof(status_core), "%s", s_clock);
@@ -459,7 +492,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   } else if (final_now) {
     snprintf(status_core, sizeof(status_core), "FINAL");
   } else {
-    snprintf(status_core, sizeof(status_core), "%s", s_next_game[0] ? s_next_game : "No Game");
+    snprintf(status_core, sizeof(status_core), "%s", s_next_game[0] ? "Bye Week" : "No Game");
   }
   if (s_featured_tag[0]) snprintf(status_buf, sizeof(status_buf), "%s - %s", s_featured_tag, status_core);
   else snprintf(status_buf, sizeof(status_buf), "%s", status_core);
@@ -475,6 +508,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     snprintf(detail_buf, sizeof(detail_buf), "%s", s_network);
   } else if (final_now && s_next_game[0]) {
     snprintf(detail_buf, sizeof(detail_buf), "%s", s_next_game);
+  } else if (off_now && s_next_game[0]) {
+    snprintf(detail_buf, sizeof(detail_buf), "%s", s_next_game);
   }
   if (detail_buf[0]) {
     graphics_draw_text(ctx, detail_buf, f_small, GRect(hpad, detail_y, w - 2 * hpad, 20),
@@ -489,7 +524,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   }
 
   // Field position bar
-  draw_field_bar(ctx, hpad, fb_y, w - 2 * hpad, fb_h);
+  draw_field_bar(ctx, hpad, fb_y, w - 2 * hpad, fb_h, f_tiny);
 }
 
 // ── Clock ────────────────────────────────────────────────────────────────
@@ -556,7 +591,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   t = dict_find(iter, KEY_LAST_PLAY);
   if (t) { strncpy(s_last_play, t->value->cstring, 43); s_last_play[43] = 0; }
   t = dict_find(iter, KEY_NEXT_GAME);
-  if (t) { strncpy(s_next_game, t->value->cstring, 23); s_next_game[23] = 0; }
+  if (t) { strncpy(s_next_game, t->value->cstring, 31); s_next_game[31] = 0; }
   t = dict_find(iter, KEY_BATTERY_BAR);
   if (t) { s_battery_bar = (bool)t->value->int32; persist_write_bool(PERSIST_BAT, s_battery_bar); }
   t = dict_find(iter, KEY_TEAM_LOGOS);
@@ -619,11 +654,14 @@ static void window_load(Window *window) {
   s_canvas = layer_create(bounds);
   layer_set_update_proc(s_canvas, canvas_update);
   layer_add_child(root, s_canvas);
+
+  s_football_bmp = gbitmap_create_with_resource(FOOTBALL_RESOURCE);
 }
 
 static void window_unload(Window *window) {
   if (s_ticker_timer) { app_timer_cancel(s_ticker_timer); s_ticker_timer = NULL; }
   if (s_canvas) { layer_destroy(s_canvas); s_canvas = NULL; }
+  if (s_football_bmp) { gbitmap_destroy(s_football_bmp); s_football_bmp = NULL; }
   if (s_away_logo_lg) { gbitmap_destroy(s_away_logo_lg); s_away_logo_lg = NULL; }
   if (s_away_logo_sm) { gbitmap_destroy(s_away_logo_sm); s_away_logo_sm = NULL; }
   if (s_home_logo_lg) { gbitmap_destroy(s_home_logo_lg); s_home_logo_lg = NULL; }

@@ -68,6 +68,18 @@
         },
         {
           "type": "png",
+          "name": "FOOTBALL_EM",
+          "file": "images/FOOTBALL_EM.png",
+          "targetPlatforms": ["emery"]
+        },
+        {
+          "type": "png",
+          "name": "FOOTBALL_BA",
+          "file": "images/FOOTBALL_BA.png",
+          "targetPlatforms": ["aplite", "basalt", "diorite", "flint"]
+        },
+        {
+          "type": "png",
           "name": "LOGO_ARI_EM_LG",
           "file": "images/logos/ARI_EM_LG.png",
           "targetPlatforms": [

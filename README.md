@@ -8,11 +8,13 @@ Stuck in a meeting? Can't watch the game? Don't worry - keep the score on your w
 
 **Live game** - team logos (Pebble Time 2 / Time), score, quarter & clock, down & distance, last play, TV network
 
-**Field position bar** - a compact field graphic instead of a static diamond: end zones shaded in each team's real color (Pebble Time 2), a marker showing exactly where the ball is, and a red outline that appears the instant either team enters the red zone and disappears the instant they leave it - no animation, just an at-a-glance state change
+**Field position bar** - a compact field graphic instead of a static diamond: end zones shaded in each team's real color and labeled with its abbreviation (Pebble Time 2), a football-shaped marker showing exactly where the ball is with a small arrow for which way it's headed, and a red outline that appears the instant either team enters the red zone and disappears the instant they leave it - no animation, just an at-a-glance state change
 
 **Pre-game** - kickoff time, TV network, team records
 
 **Final** - final score, next scheduled game (including bye-week lookahead)
+
+**Bye week** - "Bye Week" and your next opponent on their own lines, with both teams' logos already up on the field bar so next week's matchup is right there waiting
 
 **Ticker** - sits right under the time and date, same spot as the MLB watchface, cycling through every other game happening this week at a speed you control
 

@@ -358,10 +358,20 @@ function findNextGame(currentWeek, abbr, attemptsLeft, callback) {
 }
 
 // ── Main fetch ───────────────────────────────────────────────────────────
-function sendOffMessage(nextGameText) {
+// On a bye, still show the upcoming matchup's team logos in their normal
+// away/home slots (rather than blank placeholders) using next week's actual
+// game, if one was found.
+function sendOffMessage(nextGameText, nextEv) {
   var msg = {};
   msg[KEY_STATUS]    = "off";
   msg[KEY_NEXT_GAME] = nextGameText || "";
+  msg[KEY_AWAY_ABBR] = "---";
+  msg[KEY_HOME_ABBR] = "---";
+  if (nextEv) {
+    var comp = nextEv.competitions[0];
+    msg[KEY_AWAY_ABBR] = (competitorFor(comp, "away").team || {}).abbreviation || "---";
+    msg[KEY_HOME_ABBR] = (competitorFor(comp, "home").team || {}).abbreviation || "---";
+  }
   sendMessage(msg);
 }
 
@@ -394,8 +404,8 @@ function buildNextGameText(ev, abbr) {
   var opp   = (away === abbr) ? home : away;
   var t     = formatStartTime(comp.date || "");
   var day   = formatDayOfWeek(comp.date || "");
-  var text  = "Bye - Next: " + opp + (day ? " " + day : "") + (t ? " " + t : "");
-  return text.length > 23 ? text.substring(0, 23) : text;
+  var text  = "Next: " + opp + (day ? " " + day : "") + (t ? " " + t : "");
+  return text.length > 31 ? text.substring(0, 31) : text;
 }
 
 function stateOf(comp) {
@@ -437,7 +447,7 @@ function processEvents(data, events, week, abbr) {
   if (!ev) {
     // Bye week, and no primetime game is live/imminent right now either.
     findNextGame(week, abbr, 3, function(nextEv) {
-      sendOffMessage(nextEv ? buildNextGameText(nextEv, abbr) : "Bye Week");
+      sendOffMessage(nextEv ? buildNextGameText(nextEv, abbr) : "", nextEv);
     });
     return;
   }
