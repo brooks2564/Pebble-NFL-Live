@@ -14,7 +14,7 @@ Stuck in a meeting? Can't watch the game? Don't worry - keep the score on your w
 
 **Final** - final score, next scheduled game (including bye-week lookahead)
 
-**Ticker** - cycles through every other game happening this week
+**Ticker** - sits right under the time and date, same spot as the MLB watchface, cycling through every other game happening this week at a speed you control
 
 **Notifications** - feel it before you see it: 1 short buzz for a field goal or safety, 3 short buzzes for a touchdown; no buzz for extra points or two-point tries
 
@@ -27,6 +27,7 @@ Stuck in a meeting? Can't watch the game? Don't worry - keep the score on your w
 | Team | All 32 NFL teams |
 | Auto-Show Primetime Games | On / Off |
 | Team Logos | On / Off |
+| Ticker Speed | 5s / 10s / 30s / 60s |
 | Vibrate on Score | On / Off |
 | Battery Bar | On / Off |
 

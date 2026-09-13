@@ -27,19 +27,21 @@
 #define KEY_NETWORK      24
 #define KEY_FEATURED_TAG 25
 #define KEY_TEAM_LOGOS   26
+#define KEY_TICKER_SPEED 27
 
-#define PERSIST_TEAM        1
-#define PERSIST_VIB         2
-#define PERSIST_BAT         3
-#define PERSIST_TEAM_LOGOS  4
+#define PERSIST_TEAM         1
+#define PERSIST_VIB          2
+#define PERSIST_BAT          3
+#define PERSIST_TEAM_LOGOS   4
+#define PERSIST_TICKER_SPEED 5
 
 #define MAX_GAMES 6
 #define GAME_LEN  26
-#define TICKER_INTERVAL_MS 6000
 
 static Window *s_window;
 static Layer  *s_canvas;
 static AppTimer *s_ticker_timer;
+static int s_ticker_speed = 5000; // ms between ticker advances (default 5s)
 
 // Ticker state — parsed from the pipe-delimited TICKER string
 static char s_ticker_raw[200];
@@ -114,7 +116,7 @@ static void ticker_advance(void *ctx) {
     s_game_idx = (s_game_idx + 1) % s_game_count;
     if (s_canvas) layer_mark_dirty(s_canvas);
   }
-  s_ticker_timer = app_timer_register(TICKER_INTERVAL_MS, ticker_advance, NULL);
+  s_ticker_timer = app_timer_register((uint32_t)s_ticker_speed, ticker_advance, NULL);
 }
 
 // ── Team colors (emery only — see MLB blueprint precedent) ─────────────────
@@ -373,22 +375,26 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   GFont f_mid   = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   GFont f_small = fonts_get_system_font(FONT_KEY_GOTHIC_18);
   GFont f_tiny  = fonts_get_system_font(FONT_KEY_GOTHIC_14);
-  int score_w = 110, abbr_w = 44, score_h = 32;
-  int score_y = by - 8, rec_y = by + 16;
-  int status_y = by + 36, detail_y = by + 58, lp_y = by + 78;
-  int fb_y = by + 100, fb_h = 24;
-  int ticker_y = fb_y + fb_h + 8, ticker_h = 16;
+  // score_h/abbr logo height match the emery LG logo (36x36) exactly, and
+  // score_y sits far enough below the divider that the logo never paints
+  // over it (badges are opaque, unlike text, so they need real clearance).
+  int score_w = 110, abbr_w = 44, score_h = 36;
+  int score_y = by + 2, rec_y = by + 26;
+  int status_y = by + 46, detail_y = by + 68, lp_y = by + 88;
+  int fb_y = by + 110, fb_h = 24;
+  int ticker_top_y = 32, ticker_top_h = 24;
 #else
   GFont f_score = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   GFont f_abbr  = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   GFont f_mid   = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   GFont f_small = fonts_get_system_font(FONT_KEY_GOTHIC_14);
   GFont f_tiny  = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  // score_h matches the basalt LG logo (26x26) exactly, same reasoning as above.
   int score_w = 68, abbr_w = 36, score_h = 26;
-  int score_y = by - 4, rec_y = by + 20;
-  int status_y = by + 34, detail_y = by + 48, lp_y = by + 62;
-  int fb_y = by + 78, fb_h = 14;
-  int ticker_y = fb_y + fb_h + 4, ticker_h = 12;
+  int score_y = by, rec_y = by + 24;
+  int status_y = by + 38, detail_y = by + 52, lp_y = by + 66;
+  int fb_y = by + 82, fb_h = 14;
+  int ticker_top_y = 28, ticker_top_h = 18;
 #endif
 
   // Time + date
@@ -407,13 +413,12 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     GRect(56, 2, w - 56 - hpad, 20), GTextOverflowModeWordWrap, GTextAlignmentRight, NULL);
 #endif
 
-  // Primetime badge — shown only when Auto-Show Primetime Games has switched
-  // the screen to tonight's TNF/SNF/MNF game instead of your own team
-  if (s_featured_tag[0]) {
-    graphics_context_set_text_color(ctx, GColorYellow);
-    graphics_draw_text(ctx, s_featured_tag, f_tiny, GRect(hpad, split - 16, w - 2 * hpad, 14),
-      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  }
+  // Ticker — other games this week, cycling every few seconds. Same slot as
+  // the MLB watchface: directly under the time/date row, above the divider.
+  graphics_context_set_text_color(ctx, GColorLightGray);
+  const char *ticker_text = (s_game_count > 0) ? s_games[s_game_idx] : "";
+  graphics_draw_text(ctx, ticker_text, f_tiny, GRect(hpad, ticker_top_y, w - 2 * hpad, ticker_top_h),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
   // Away / Home badges (team logo when enabled + available, else abbreviation) + score
   draw_team_badge(ctx, s_away_abbr, f_abbr, GRect(hpad, score_y, abbr_w, score_h),
@@ -440,19 +445,24 @@ static void canvas_update(Layer *layer, GContext *ctx) {
       GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
   }
 
-  // Status row: quarter + clock (live), kickoff time (pre), FINAL (final), bye (off)
+  // Status row: quarter + clock (live), kickoff time (pre), FINAL (final), bye (off).
+  // A featured-primetime game (see Auto-Show Primetime Games) prefixes an
+  // "SNF"/"MNF"/"TNF" tag so it's never mistaken for your own team's game.
   graphics_context_set_text_color(ctx, GColorWhite);
-  char status_buf[24] = "";
+  char status_buf[32] = "";
+  char status_core[24] = "";
   if (live_now) {
-    if (s_quarter > 0) snprintf(status_buf, sizeof(status_buf), "Q%d  %s", s_quarter, s_clock);
-    else snprintf(status_buf, sizeof(status_buf), "%s", s_clock);
+    if (s_quarter > 0) snprintf(status_core, sizeof(status_core), "Q%d  %s", s_quarter, s_clock);
+    else snprintf(status_core, sizeof(status_core), "%s", s_clock);
   } else if (pre_now) {
-    snprintf(status_buf, sizeof(status_buf), "Kickoff %s", s_start_time);
+    snprintf(status_core, sizeof(status_core), "Kickoff %s", s_start_time);
   } else if (final_now) {
-    snprintf(status_buf, sizeof(status_buf), "FINAL");
+    snprintf(status_core, sizeof(status_core), "FINAL");
   } else {
-    snprintf(status_buf, sizeof(status_buf), "%s", s_next_game[0] ? s_next_game : "No Game");
+    snprintf(status_core, sizeof(status_core), "%s", s_next_game[0] ? s_next_game : "No Game");
   }
+  if (s_featured_tag[0]) snprintf(status_buf, sizeof(status_buf), "%s - %s", s_featured_tag, status_core);
+  else snprintf(status_buf, sizeof(status_buf), "%s", status_core);
   graphics_draw_text(ctx, status_buf, f_mid, GRect(hpad, status_y, w - 2 * hpad, 26),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
@@ -480,12 +490,6 @@ static void canvas_update(Layer *layer, GContext *ctx) {
 
   // Field position bar
   draw_field_bar(ctx, hpad, fb_y, w - 2 * hpad, fb_h);
-
-  // Ticker — other games this week, cycling every few seconds
-  graphics_context_set_text_color(ctx, GColorLightGray);
-  const char *ticker_text = (s_game_count > 0) ? s_games[s_game_idx] : "";
-  graphics_draw_text(ctx, ticker_text, f_tiny, GRect(hpad, ticker_y, w - 2 * hpad, ticker_h + 4),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 }
 
 // ── Clock ────────────────────────────────────────────────────────────────
@@ -557,6 +561,19 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if (t) { s_battery_bar = (bool)t->value->int32; persist_write_bool(PERSIST_BAT, s_battery_bar); }
   t = dict_find(iter, KEY_TEAM_LOGOS);
   if (t) { s_team_logos = (bool)t->value->int32; persist_write_bool(PERSIST_TEAM_LOGOS, s_team_logos); }
+  t = dict_find(iter, KEY_TICKER_SPEED);
+  if (t) {
+    int spd = (int)t->value->int32;
+    // Accept only valid values: 5000, 10000, 30000, 60000
+    if (spd == 5000 || spd == 10000 || spd == 30000 || spd == 60000) {
+      s_ticker_speed = spd;
+      persist_write_int(PERSIST_TICKER_SPEED, s_ticker_speed);
+      if (s_ticker_timer) {
+        app_timer_cancel(s_ticker_timer);
+        s_ticker_timer = app_timer_register((uint32_t)s_ticker_speed, ticker_advance, NULL);
+      }
+    }
+  }
   t = dict_find(iter, KEY_NETWORK);
   if (t) { strncpy(s_network, t->value->cstring, 23); s_network[23] = 0; }
   t = dict_find(iter, KEY_FEATURED_TAG);
@@ -620,6 +637,7 @@ static void init(void) {
   if (persist_exists(PERSIST_VIB))         s_vibrate     = persist_read_bool(PERSIST_VIB);
   if (persist_exists(PERSIST_BAT))         s_battery_bar = persist_read_bool(PERSIST_BAT);
   if (persist_exists(PERSIST_TEAM_LOGOS))  s_team_logos  = persist_read_bool(PERSIST_TEAM_LOGOS);
+  if (persist_exists(PERSIST_TICKER_SPEED)) s_ticker_speed = persist_read_int(PERSIST_TICKER_SPEED);
 
   time_t now = time(NULL);
   update_clock(localtime(&now));
@@ -638,7 +656,7 @@ static void init(void) {
   app_message_register_inbox_dropped(inbox_dropped);
   app_message_open(512, 64);
 
-  s_ticker_timer = app_timer_register(TICKER_INTERVAL_MS, ticker_advance, NULL);
+  s_ticker_timer = app_timer_register((uint32_t)s_ticker_speed, ticker_advance, NULL);
   // Delay initial fetch so Clay's ready-event config send isn't competing with game data
   app_timer_register(2000, (AppTimerCallback)request_game_data, NULL);
 }

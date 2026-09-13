@@ -91,6 +91,19 @@
         "label": "Team Logos",
         "description": "Show team logos instead of 3-letter abbreviations (color platforms only)",
         "defaultValue": true
+      },
+      {
+        "type": "select",
+        "messageKey": "TICKER_SPEED",
+        "label": "Ticker Speed",
+        "description": "How long each other game shows before cycling",
+        "defaultValue": 5000,
+        "options": [
+          { "label": "5 seconds (default)", "value": 5000  },
+          { "label": "10 seconds",          "value": 10000 },
+          { "label": "30 seconds",          "value": 30000 },
+          { "label": "60 seconds",          "value": 60000 }
+        ]
       }
     ]
   },

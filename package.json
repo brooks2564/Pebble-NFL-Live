@@ -55,7 +55,8 @@
       "SCORE_EVENT": 23,
       "NETWORK": 24,
       "FEATURED_TAG": 25,
-      "TEAM_LOGOS": 26
+      "TEAM_LOGOS": 26,
+      "TICKER_SPEED": 27
     },
     "resources": {
       "media": [
