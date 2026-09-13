@@ -30,6 +30,8 @@
 #define KEY_TICKER_SPEED 27
 #define KEY_AWAY_STATS   28
 #define KEY_HOME_STATS   29
+#define KEY_AWAY_TURNOVERS 30
+#define KEY_HOME_TURNOVERS 31
 
 #define PERSIST_TEAM         1
 #define PERSIST_VIB          2
@@ -79,11 +81,11 @@ static int  s_battery_pct   = 100;
 static char s_network[24]   = "";
 static char s_featured_tag[5] = ""; // "TNF"/"SNF"/"MNF" when auto-featuring a primetime game
 static bool s_team_logos    = true;
-static char s_away_stats[20] = ""; // "P:123 R:45"
-static char s_home_stats[20] = "";
-static bool s_stats_toggle  = false; // flips each MINUTE_UNIT tick - alternates
-                                      // the down/last-play rows with the
-                                      // passing/rushing stat lines
+static char s_away_stats[20] = ""; // "P:123 R:45" - shown below the score row
+static char s_home_stats[20] = ""; // during live games, in the space normally
+                                    // used for pre/final records
+static char s_away_turnovers[16] = ""; // "INT:2 FUMB:2" - emery only, one
+static char s_home_turnovers[16] = ""; // more line below the P/R line
 
 // Cached logo bitmaps - reloaded only when the away/home abbreviation changes
 #ifdef PBL_COLOR
@@ -327,6 +329,42 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez
   graphics_fill_rect(ctx, GRect(x + w - ez_w, y, ez_w, h), 0, GCornerNone);
 #endif
 
+  // 10-yard lines, plus the goal lines (0-yard lines) separating each
+  // endzone from the field - all full sideline-to-sideline (top of the bar
+  // to the bottom, never beyond it). Drawn on top of the green field but
+  // before the red zone outline, so the stacking order (bottom to top) is
+  // green -> yard/goal lines -> red (or white) outline -> everything else.
+  // graphics_draw_line() treats both endpoints as inclusive pixels, so a
+  // line from y to y+h is h+1 pixels tall - one row taller than the bar
+  // itself. Stopping at y+h-1 keeps every line exactly within the bar.
+  int field_w = w - 2 * ez_w;
+  graphics_context_set_stroke_color(ctx, GColorWhite);
+  graphics_draw_line(ctx, GPoint(x + ez_w, y), GPoint(x + ez_w, y + h - 1));
+  graphics_draw_line(ctx, GPoint(x + w - ez_w, y), GPoint(x + w - ez_w, y + h - 1));
+  for (int i = 1; i < 10; i++) {
+    int tx = x + ez_w + (field_w * i) / 10;
+    graphics_draw_line(ctx, GPoint(tx, y), GPoint(tx, y + h - 1));
+  }
+
+  // Red zone outline - on while REDZONE is true, off the moment it clears.
+  // Drawn after the yard lines (so it sits on top of them) but before the
+  // endzone labels/ball, so those still paint on top of it and the red
+  // never covers any of them - it only shows through the plain field/
+  // endzone background and over the yard lines.
+#ifdef PBL_COLOR
+  GColor rz_color = GColorRed;
+#else
+  GColor rz_color = GColorWhite;
+#endif
+  GColor outline = s_redzone ? rz_color : GColorWhite;
+  graphics_context_set_stroke_color(ctx, outline);
+  graphics_draw_rect(ctx, bar);
+  if (s_redzone) {
+    // second pass, 1px in, so the outline reads as a clear 2px ring
+    GRect inner = GRect(x + 1, y + 1, w - 2, h - 2);
+    graphics_draw_rect(ctx, inner);
+  }
+
   // Endzone abbreviations - white-on-black halo reads over any team color.
   // Emery-only: the smaller platforms' endzones aren't wide enough to fit a
   // 3-letter abbreviation without truncating it, so skip it there entirely
@@ -335,18 +373,6 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez
   draw_halo_text(ctx, s_away_abbr, f_ez, GRect(x, y, ez_w, h));
   draw_halo_text(ctx, s_home_abbr, f_ez, GRect(x + w - ez_w, y, ez_w, h));
 #endif
-
-  // Separator lines between end zone and field
-  graphics_context_set_stroke_color(ctx, GColorWhite);
-  graphics_draw_line(ctx, GPoint(x + ez_w, y), GPoint(x + ez_w, y + h));
-  graphics_draw_line(ctx, GPoint(x + w - ez_w, y), GPoint(x + w - ez_w, y + h));
-
-  // 10-yard tick marks across the field
-  int field_w = w - 2 * ez_w;
-  for (int i = 1; i < 10; i++) {
-    int tx = x + ez_w + (field_w * i) / 10;
-    graphics_draw_line(ctx, GPoint(tx, y + h - 4), GPoint(tx, y + h));
-  }
 
   // 20- and 50-yard line labels, just below the field
   graphics_context_set_text_color(ctx, GColorWhite);
@@ -377,22 +403,6 @@ static void draw_field_bar(GContext *ctx, int x, int y, int w, int h, GFont f_ez
       graphics_draw_text(ctx, arrow, f_ez, GRect(arrow_x, y - 1, 10, h),
         GTextOverflowModeFill, GTextAlignmentCenter, NULL);
     }
-  }
-
-  // Red zone outline - on while REDZONE is true, off the moment it clears
-#ifdef PBL_COLOR
-  GColor rz_color = GColorRed;
-#else
-  GColor rz_color = GColorWhite;
-#endif
-  GColor outline = s_redzone ? rz_color : GColorLightGray;
-  graphics_context_set_stroke_color(ctx, outline);
-  GRect outline_rect = bar;
-  graphics_draw_rect(ctx, outline_rect);
-  if (s_redzone) {
-    // second pass, 1px in, so the outline reads as a clear 2px ring
-    GRect inner = GRect(x + 1, y + 1, w - 2, h - 2);
-    graphics_draw_rect(ctx, inner);
   }
 }
 
@@ -443,9 +453,9 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   // score_y sits far enough below the divider that the logo never paints
   // over it (badges are opaque, unlike text, so they need real clearance).
   int score_w = 110, abbr_w = 44, score_h = 36;
-  int score_y = by + 2, rec_y = by + 40;
-  int status_y = by + 60, detail_y = by + 82, lp_y = by + 102;
-  int fb_y = by + 124, fb_h = 28;
+  int score_y = by + 2, rec_y = by + 40, turnover_y = by + 56;
+  int status_y = by + 72, detail_y = by + 94, lp_y = by + 114;
+  int fb_y = by + 136, fb_h = 16;
   int yard_y = fb_y + fb_h + 1;
   int ticker_top_y = 32, ticker_top_h = 24;
 #else
@@ -502,13 +512,31 @@ static void canvas_update(Layer *layer, GContext *ctx) {
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
-  // Records
+  // Records (pre/final) or passing+rushing yards (live) - this row sits
+  // directly under the score and is otherwise blank during a live game, so
+  // the stat line gets it instead of needing a row of its own.
   if (pre_now || final_now) {
     graphics_context_set_text_color(ctx, GColorLightGray);
     graphics_draw_text(ctx, s_away_record, f_tiny, GRect(hpad, rec_y, abbr_w + 20, 16),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     graphics_draw_text(ctx, s_home_record, f_tiny, GRect(w - abbr_w - hpad - 20, rec_y, abbr_w + 20, 16),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+  } else if (live_now && (s_away_stats[0] || s_home_stats[0])) {
+    graphics_context_set_text_color(ctx, GColorLightGray);
+    graphics_draw_text(ctx, s_away_stats, f_tiny, GRect(hpad, rec_y, abbr_w + 30, 16),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, s_home_stats, f_tiny, GRect(w - abbr_w - hpad - 30, rec_y, abbr_w + 30, 16),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+#ifdef PBL_PLATFORM_EMERY
+    // Turnovers get their own line right below the P/R line - emery only,
+    // the smaller screens don't have room for a fourth stacked row here.
+    if (s_away_turnovers[0] || s_home_turnovers[0]) {
+      graphics_draw_text(ctx, s_away_turnovers, f_tiny, GRect(hpad, turnover_y, abbr_w + 30, 16),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      graphics_draw_text(ctx, s_home_turnovers, f_tiny, GRect(w - abbr_w - hpad - 30, turnover_y, abbr_w + 30, 16),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    }
+#endif
   }
 
   // Status row: quarter + clock (live), kickoff time (pre), FINAL (final), bye (off).
@@ -532,17 +560,10 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   graphics_draw_text(ctx, status_buf, f_mid, GRect(hpad, status_y, w - 2 * hpad, 26),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
-  // Detail + last-play rows: down & distance / last play (live), network
-  // (pre), next game (final/bye) - on a live game, these two rows swap to
-  // each team's passing/rushing line once a minute instead (see
-  // s_stats_toggle in tick_handler), no extra screen space needed.
-  bool show_stats = live_now && s_stats_toggle && (s_away_stats[0] || s_home_stats[0]);
-
+  // Detail row: down & distance (live), network (pre), next game (final/bye)
   graphics_context_set_text_color(ctx, GColorLightGray);
   char detail_buf[32] = "";
-  if (show_stats) {
-    snprintf(detail_buf, sizeof(detail_buf), "%s %s", s_away_abbr, s_away_stats);
-  } else if (live_now && s_down_text[0]) {
+  if (live_now && s_down_text[0]) {
     snprintf(detail_buf, sizeof(detail_buf), "%s", s_down_text);
   } else if (pre_now && s_network[0]) {
     snprintf(detail_buf, sizeof(detail_buf), "%s", s_network);
@@ -556,14 +577,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
-  // Last play (or the home team's stat line during the stats phase)
-  if (show_stats) {
-    char home_stat_buf[32];
-    snprintf(home_stat_buf, sizeof(home_stat_buf), "%s %s", s_home_abbr, s_home_stats);
-    graphics_context_set_text_color(ctx, GColorLightGray);
-    graphics_draw_text(ctx, home_stat_buf, f_tiny, GRect(hpad, lp_y, w - 2 * hpad, 18),
-      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  } else if (live_now && s_last_play[0]) {
+  // Last play - always visible on a live game
+  if (live_now && s_last_play[0]) {
     graphics_context_set_text_color(ctx, GColorLightGray);
     graphics_draw_text(ctx, s_last_play, f_tiny, GRect(hpad, lp_y, w - 2 * hpad, 18),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
@@ -582,10 +597,7 @@ static void update_clock(struct tm *t) {
 
 static void tick_handler(struct tm *t, TimeUnits units) {
   update_clock(t);
-  if (units & MINUTE_UNIT) {
-    request_game_data();
-    s_stats_toggle = !s_stats_toggle;
-  }
+  if (units & MINUTE_UNIT) request_game_data();
   if (s_canvas) layer_mark_dirty(s_canvas);
 }
 
@@ -644,6 +656,10 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if (t) { strncpy(s_away_stats, t->value->cstring, 19); s_away_stats[19] = 0; }
   t = dict_find(iter, KEY_HOME_STATS);
   if (t) { strncpy(s_home_stats, t->value->cstring, 19); s_home_stats[19] = 0; }
+  t = dict_find(iter, KEY_AWAY_TURNOVERS);
+  if (t) { strncpy(s_away_turnovers, t->value->cstring, 15); s_away_turnovers[15] = 0; }
+  t = dict_find(iter, KEY_HOME_TURNOVERS);
+  if (t) { strncpy(s_home_turnovers, t->value->cstring, 15); s_home_turnovers[15] = 0; }
   t = dict_find(iter, KEY_NEXT_GAME);
   if (t) { strncpy(s_next_game, t->value->cstring, 31); s_next_game[31] = 0; }
   t = dict_find(iter, KEY_BATTERY_BAR);

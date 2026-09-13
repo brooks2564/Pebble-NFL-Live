@@ -33,6 +33,8 @@ var KEY_FEATURED_TAG = 25;
 var KEY_TEAM_LOGOS   = 26;
 var KEY_AWAY_STATS   = 28;
 var KEY_HOME_STATS   = 29;
+var KEY_AWAY_TURNOVERS = 30;
+var KEY_HOME_TURNOVERS = 31;
 
 var SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
 var SUMMARY_URL    = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary";
@@ -142,18 +144,67 @@ function findTeamStat(statsArr, name) {
 }
 
 function extractTeamStats(summaryData, awayAbbr, homeAbbr) {
-  var result = { away: "", home: "" };
+  var result = { away: "", home: "", awayTurnovers: "", homeTurnovers: "" };
   var teams = (summaryData && summaryData.boxscore && summaryData.boxscore.teams) || [];
   for (var i = 0; i < teams.length; i++) {
     var abbr = ((teams[i].team) || {}).abbreviation || "";
     var stats = teams[i].statistics || [];
     var pass = findTeamStat(stats, "netPassingYards");
     var rush = findTeamStat(stats, "rushingYards");
+    var ints = findTeamStat(stats, "interceptions");
+    var fum  = findTeamStat(stats, "fumblesLost");
     var line = "P:" + pass + " R:" + rush;
-    if (abbr === awayAbbr) result.away = line;
-    else if (abbr === homeAbbr) result.home = line;
+    var toLine = "INT:" + ints + " FUMB:" + fum;
+    if (abbr === awayAbbr) { result.away = line; result.awayTurnovers = toLine; }
+    else if (abbr === homeAbbr) { result.home = line; result.homeTurnovers = toLine; }
   }
   return result;
+}
+
+// Shortens ESPN's play-by-play text down to just the player who matters and
+// the yardage, e.g. "S.Darnold pass short middle to J.Smith-Njigba to 50 for
+// 13 yards" -> "Smith-Njigba 13 yds". Drops the passer's name on completions
+// (the QB is already known) but keeps whoever's name appears in the rusher
+// slot as-is, so a scrambling QB still shows up correctly there. Returns
+// null (caller falls back to the raw text) when the wording doesn't match
+// the expected pattern closely enough to trust - trick plays, laterals, etc.
+function extractPlayerYards(text, isPass) {
+  if (!text) return null;
+  var nameRe = "([A-Z][A-Za-z.'-]+(?:\\s[A-Z][A-Za-z.'-]+){0,2})";
+  var m;
+  if (isPass) {
+    m = new RegExp("\\bto\\s+" + nameRe + "(?:\\s+to\\s+\\S|\\s+for\\s+-?\\d|\\.)").exec(text);
+  } else {
+    m = new RegExp("^(?:\\([^)]*\\)\\s*)?" + nameRe + "\\s").exec(text);
+  }
+  if (!m) return null;
+  // ESPN writes names as "J.Smith-Njigba" (no space) - drop the leading initial
+  var name = m[1].replace(/^[A-Z]\.\s*/, "");
+  var yardsMatch = /for\s+(-?\d+)\s+yards?/.exec(text);
+  return yardsMatch ? (name + " " + yardsMatch[1] + " yds") : name;
+}
+
+// Decides whether the last play was a pass or a run using ESPN's structured
+// type field first, falling back to sniffing the text for " pass " (which
+// completions and incompletions always contain) whenever that field is
+// missing or ambiguous (e.g. "TD" covers both passing and rushing scores).
+function formatLastPlay(lastPlay) {
+  var rawText = (lastPlay && lastPlay.text) || "";
+  if (!rawText) return "";
+  var typeAbbr = ((lastPlay.type) || {}).abbreviation || "";
+
+  var isPass = typeAbbr === "REC" || typeAbbr === "INC" ||
+               (typeAbbr !== "RUSH" && rawText.indexOf(" pass ") !== -1);
+  var isRush = typeAbbr === "RUSH" ||
+               ((!typeAbbr || typeAbbr === "TD") && rawText.indexOf(" pass ") === -1 &&
+                rawText.indexOf("sacked") === -1 &&
+                /(up the middle|left end|right end|left tackle|right tackle|left guard|right guard|scrambles|kneels)/.test(rawText));
+
+  var formatted = null;
+  if (isPass) formatted = extractPlayerYards(rawText, true);
+  else if (isRush) formatted = extractPlayerYards(rawText, false);
+
+  return (formatted || rawText).substring(0, 40);
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────
@@ -516,6 +567,8 @@ function processEvents(data, events, week, abbr) {
   msg[KEY_SCORE_EVENT]  = 0;
   msg[KEY_AWAY_STATS]   = "";
   msg[KEY_HOME_STATS]   = "";
+  msg[KEY_AWAY_TURNOVERS] = "";
+  msg[KEY_HOME_TURNOVERS] = "";
 
   var situation = comp.situation;
   if (situation) {
@@ -537,7 +590,7 @@ function processEvents(data, events, week, abbr) {
     }
 
     if (situation.lastPlay && situation.lastPlay.text) {
-      msg[KEY_LAST_PLAY] = situation.lastPlay.text.substring(0, 40);
+      msg[KEY_LAST_PLAY] = formatLastPlay(situation.lastPlay);
     }
   }
 
@@ -564,6 +617,8 @@ function finishSend(status, ev, msg, isMyGame, myAbbr) {
       var stats = extractTeamStats(summaryData, msg[KEY_AWAY_ABBR], msg[KEY_HOME_ABBR]);
       msg[KEY_AWAY_STATS] = stats.away;
       msg[KEY_HOME_STATS] = stats.home;
+      msg[KEY_AWAY_TURNOVERS] = stats.awayTurnovers;
+      msg[KEY_HOME_TURNOVERS] = stats.homeTurnovers;
       sendMessage(msg);
     });
     return;

@@ -58,7 +58,9 @@
       "TEAM_LOGOS": 26,
       "TICKER_SPEED": 27,
       "AWAY_STATS": 28,
-      "HOME_STATS": 29
+      "HOME_STATS": 29,
+      "AWAY_TURNOVERS": 30,
+      "HOME_TURNOVERS": 31
     },
     "resources": {
       "media": [
