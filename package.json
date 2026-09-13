@@ -57,7 +57,14 @@
       "FEATURED_TAG": 25
     },
     "resources": {
-      "media": []
+      "media": [
+        {
+          "menuIcon": true,
+          "type": "png",
+          "name": "MENU_ICON",
+          "file": "images/menu_icon.png"
+        }
+      ]
     }
   }
 }
