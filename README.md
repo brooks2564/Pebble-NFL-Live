@@ -8,7 +8,7 @@ Stuck in a meeting? Can't watch the game? Don't worry - keep the score on your w
 
 **Team logos** - real team logos in place of 3-letter abbreviations, right in the score row. Toggle: **Team Logos** (color watches only - the B&W models fall back to colored text).
 
-**Live game** - score, quarter & clock, down & distance, and the last play - shortened to just the name that matters and the yardage (the receiver on a completion, the ball carrier on a run), so it reads like "Boutte 12 yds" instead of a full play-by-play sentence. A quarterback scrambling for yards still shows up correctly since his name is whoever's in the rusher spot. The last play is always on screen during a live game - it doesn't cycle away.
+**Live game** - score, quarter & clock, down & distance, and the last play - shortened to just the name that matters and the yardage (the receiver on a completion, the ball carrier on a run), so it reads like "Boutte 12 yds" instead of a full play-by-play sentence. A quarterback scrambling for yards still shows up correctly since his name is whoever's in the rusher spot. The last play is always on screen during a live game - it doesn't cycle away. The moment the 2nd quarter ends it just says "Halftime" until the 3rd quarter kicks off.
 
 **Team stats** - each team's passing and rushing yards ("P:220 R:95") sit right under the score, in the space that would otherwise be empty during a live game. Turnovers ("INT:2 FUMB:1") get their own line right below that.
 
