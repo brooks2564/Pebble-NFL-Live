@@ -1,5 +1,5 @@
 {
-  "name": "nfl-live-scores",
+  "name": "NFL Live",
   "author": "Brooman Inks",
   "version": "1.1.1",
   "keywords": [
@@ -10,7 +10,7 @@
     "pebble-clay": "github:brooks2564/pebble-clay-flint"
   },
   "pebble": {
-    "displayName": "NFL Live",
+    "displayName": "NFL Live Scores",
     "shortName": "NFL Live",
     "longName": "NFL Live Scores",
     "uuid": "b13118dd-472d-4ce5-a65b-5c8515fcb02d",
