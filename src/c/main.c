@@ -504,13 +504,43 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     GTextOverflowModeTrailingEllipsis, GTextAlignmentRight,
     s_home_logo_lg, s_home_logo_sm, true);
 
+  // Possession football icon - emery only, slots into the badge/score gap on
+  // whichever side has the ball, reusing the field-bar football bitmap drawn
+  // at a smaller fixed size (icon_w+2px taken from the score box; the score
+  // font also drops a size so "XX - XX" never truncates in the narrower box).
+  int score_x = hpad + abbr_w;
+  int score_box_w = score_w;
+  GFont score_font = f_score;
+#ifdef PBL_PLATFORM_EMERY
+  const int poss_icon_w = 14, poss_icon_h = 14;
+  bool show_poss_icon = live_now && s_football_bmp && (s_possession == 0 || s_possession == 1);
+  if (show_poss_icon) {
+    int poss_slot = poss_icon_w + 2;
+    score_box_w = score_w - poss_slot;
+    score_font = f_abbr; // GOTHIC_28_BOLD - narrower than BITHAM_30_BLACK, still fits 2-digit scores
+    if (s_possession == 0) score_x = hpad + abbr_w + poss_slot;
+  }
+#endif
+
   if (!off_now) {
     char sbuf[16];
     graphics_context_set_text_color(ctx, GColorWhite);
     snprintf(sbuf, sizeof(sbuf), "%d - %d", s_away_score, s_home_score);
-    graphics_draw_text(ctx, sbuf, f_score, GRect(hpad + abbr_w, score_y, score_w, score_h),
+    graphics_draw_text(ctx, sbuf, score_font, GRect(score_x, score_y, score_box_w, score_h),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
+
+#ifdef PBL_PLATFORM_EMERY
+  if (show_poss_icon) {
+    int icon_x = (s_possession == 0) ? (hpad + abbr_w)
+                                      : (hpad + abbr_w + score_w - poss_icon_w);
+    int icon_y = score_y + (score_h - poss_icon_h) / 2;
+    graphics_context_set_compositing_mode(ctx, GCompOpSet);
+    graphics_draw_bitmap_in_rect(ctx, s_football_bmp,
+      GRect(icon_x, icon_y, poss_icon_w, poss_icon_h));
+    graphics_context_set_compositing_mode(ctx, GCompOpAssign);
+  }
+#endif
 
   // Records (pre/final) or passing+rushing yards (live) - this row sits
   // directly under the score and is otherwise blank during a live game, so
