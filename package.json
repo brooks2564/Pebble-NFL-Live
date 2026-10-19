@@ -78,6 +78,12 @@
         },
         {
           "type": "png",
+          "name": "FOOTBALL_EM_WHITE",
+          "file": "images/FOOTBALL_EM_WHITE.png",
+          "targetPlatforms": ["emery"]
+        },
+        {
+          "type": "png",
           "name": "FOOTBALL_BA",
           "file": "images/FOOTBALL_BA.png",
           "targetPlatforms": ["aplite", "basalt", "diorite", "flint"]
