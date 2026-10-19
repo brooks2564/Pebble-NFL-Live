@@ -98,14 +98,11 @@ static GBitmap *s_away_logo_lg = NULL, *s_away_logo_sm = NULL;
 static GBitmap *s_home_logo_lg = NULL, *s_home_logo_sm = NULL;
 #endif
 
-// Single shared football icon used as the field-bar ball marker (loaded once,
-// not per-team)
+// Single shared football icon, used both as the field-bar ball marker and
+// the score-row possession icon (brown-outlined - loaded once, not per-team)
 static GBitmap *s_football_bmp = NULL;
 #ifdef PBL_PLATFORM_EMERY
   #define FOOTBALL_RESOURCE RESOURCE_ID_FOOTBALL_EM
-  // White-outline variant, used only for the possession icon next to the
-  // score (field-bar marker keeps the original black outline).
-  static GBitmap *s_football_bmp_white = NULL;
 #else
   #define FOOTBALL_RESOURCE RESOURCE_ID_FOOTBALL_BA
 #endif
@@ -508,17 +505,16 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     s_home_logo_lg, s_home_logo_sm, true);
 
   // Possession football icon - emery only, slots into the badge/score gap on
-  // whichever side has the ball. Drawn at the bitmap's native size (same as
-  // the field-bar marker - no scaling, so shape/size match exactly), but
-  // uses the white-outline variant for contrast against the black
-  // background (the field-bar marker itself keeps its black outline). The
-  // score font drops a size so "XX - XX" still fits the narrower box.
+  // whichever side has the ball. Drawn at the bitmap's native size, same as
+  // the field-bar marker (no scaling, so shape/size match exactly) - both
+  // now share the same brown-outlined FOOTBALL_EM bitmap. The score font
+  // drops a size so "XX - XX" still fits the narrower box.
   int score_x = hpad + abbr_w;
   int score_box_w = score_w;
   GFont score_font = f_score;
 #ifdef PBL_PLATFORM_EMERY
-  GRect poss_icon_b = s_football_bmp_white ? gbitmap_get_bounds(s_football_bmp_white) : GRect(0, 0, 0, 0);
-  bool show_poss_icon = live_now && s_football_bmp_white && (s_possession == 0 || s_possession == 1);
+  GRect poss_icon_b = s_football_bmp ? gbitmap_get_bounds(s_football_bmp) : GRect(0, 0, 0, 0);
+  bool show_poss_icon = live_now && s_football_bmp && (s_possession == 0 || s_possession == 1);
   if (show_poss_icon) {
     int poss_slot = poss_icon_b.size.w + 2;
     score_box_w = score_w - poss_slot;
@@ -541,7 +537,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
                                       : (hpad + abbr_w + score_w - poss_icon_b.size.w);
     int icon_y = score_y + (score_h - poss_icon_b.size.h) / 2;
     graphics_context_set_compositing_mode(ctx, GCompOpSet);
-    graphics_draw_bitmap_in_rect(ctx, s_football_bmp_white,
+    graphics_draw_bitmap_in_rect(ctx, s_football_bmp,
       GRect(icon_x, icon_y, poss_icon_b.size.w, poss_icon_b.size.h));
     graphics_context_set_compositing_mode(ctx, GCompOpAssign);
   }
@@ -761,18 +757,12 @@ static void window_load(Window *window) {
   layer_add_child(root, s_canvas);
 
   s_football_bmp = gbitmap_create_with_resource(FOOTBALL_RESOURCE);
-#ifdef PBL_PLATFORM_EMERY
-  s_football_bmp_white = gbitmap_create_with_resource(RESOURCE_ID_FOOTBALL_EM_WHITE);
-#endif
 }
 
 static void window_unload(Window *window) {
   if (s_ticker_timer) { app_timer_cancel(s_ticker_timer); s_ticker_timer = NULL; }
   if (s_canvas) { layer_destroy(s_canvas); s_canvas = NULL; }
   if (s_football_bmp) { gbitmap_destroy(s_football_bmp); s_football_bmp = NULL; }
-#ifdef PBL_PLATFORM_EMERY
-  if (s_football_bmp_white) { gbitmap_destroy(s_football_bmp_white); s_football_bmp_white = NULL; }
-#endif
   if (s_away_logo_lg) { gbitmap_destroy(s_away_logo_lg); s_away_logo_lg = NULL; }
   if (s_away_logo_sm) { gbitmap_destroy(s_away_logo_sm); s_away_logo_sm = NULL; }
   if (s_home_logo_lg) { gbitmap_destroy(s_home_logo_lg); s_home_logo_lg = NULL; }
